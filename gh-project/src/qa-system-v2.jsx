@@ -1,16 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from "recharts";
 import Papa from "papaparse";
 
-// CONFIGURACIÓN
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR3qt-rkXHja3wwv6HSx3Xi2V1I-NMrOa6VNrjAAFNt2SITNLmCb0gBWtdzUFDCDg/pub?gid=1321743990&single=true&output=csv";
-const CACHE_KEY = "qa_system_snapshot_v3";
-const CACHE_TIME = 12 * 60 * 60 * 1000; // 12 horas
+const CACHE_KEY = "qa_system_final_v5"; 
 
 const C = {
   bg: "#0b0e14", card: "#161b22", border: "#30363d", text: "#c9d1d9",
-  dim: "#8b949e", blue: "#58a6ff", purple: "#bc8cff", green: "#3fb950", 
-  red: "#f85149", orange: "#d29922", muted: "#484f58"
+  dim: "#8b949e", blue: "#58a6ff", green: "#3fb950", red: "#f85149", orange: "#d29922"
 };
 
 const App = () => {
@@ -20,41 +16,29 @@ const App = () => {
   const [filter, setFilter] = useState("all");
   const [syncInfo, setSyncInfo] = useState("");
 
-  // --- MOTOR DE CARGA OPTIMIZADO ---
   const fetchData = (force = false) => {
     const cached = localStorage.getItem(CACHE_KEY);
-    const lastUpdate = localStorage.getItem(CACHE_KEY + "_time");
-    const now = new Date().getTime();
-
-    if (!force && cached && lastUpdate && (now - lastUpdate < CACHE_TIME)) {
-      try {
-        setData(JSON.parse(cached));
-        setSyncInfo(`Modo Snapshot: ${new Date(parseInt(lastUpdate)).toLocaleTimeString()}`);
-        setLoading(false);
-        return;
-      } catch (e) { localStorage.removeItem(CACHE_KEY); }
+    if (!force && cached) {
+      setData(JSON.parse(cached));
+      setLoading(false);
+      setSyncInfo("Cargado de memoria local");
+      return;
     }
 
-    setSyncInfo("Descargando base de datos...");
+    setSyncInfo("Conectando con Google...");
     Papa.parse(SHEET_URL, {
       download: true,
       header: true,
-      worker: true, // Procesa en hilo separado para no congelar el navegador
       skipEmptyLines: 'greedy',
       complete: (results) => {
-        if (results.data.length === 0) {
-          setSyncInfo("Error: Archivo vacío");
-          setLoading(false);
-          return;
+        const transformed = transformData(results.data);
+        if (transformed.tls.length === 0) {
+          setSyncInfo("Error: No se detectaron columnas válidas.");
+        } else {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(transformed));
+          setData(transformed);
+          setSyncInfo("Sincronización exitosa");
         }
-        
-        // Transformación pesada fuera del hilo principal de renderizado
-        const transformed = transformAndClean(results.data);
-        localStorage.setItem(CACHE_KEY, JSON.stringify(transformed));
-        localStorage.setItem(CACHE_KEY + "_time", now.toString());
-        
-        setData(transformed);
-        setSyncInfo("Sincronización exitosa");
         setLoading(false);
       }
     });
@@ -62,166 +46,123 @@ const App = () => {
 
   useEffect(() => { fetchData(); }, []);
 
-  // --- LIMPIADOR DE DATOS DE ALTO RENDIMIENTO ---
-  const transformAndClean = (rows) => {
-    const parseNum = (v) => {
-      if (v === undefined || v === null || v === "") return null;
-      const clean = v.toString().replace(/[%, ]/g, "");
-      const num = parseFloat(clean);
-      return isNaN(num) ? null : num;
+  const transformData = (rows) => {
+    const tlsMap = {};
+    
+    // Función para buscar columnas aunque cambien de nombre
+    const getVal = (row, keys) => {
+      const foundKey = Object.keys(row).find(k => 
+        keys.some(key => k.toLowerCase().trim().includes(key.toLowerCase()))
+      );
+      return row[foundKey];
     };
 
-    const tlsMap = {};
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const tl = row['Team Leader'] || row['TL'];
-      if (!tl) continue;
+    rows.forEach(row => {
+      // Buscamos Agent, TL y Site de forma flexible
+      const agent = getVal(row, ['Agent', 'Agente', 'Name']);
+      const tl = getVal(row, ['Team Leader', 'TL', 'Lider']);
+      const site = getVal(row, ['Site', 'Sede', 'Ubicacion']) || 'N/A';
+      
+      if (!agent || agent.toString().trim() === "") return;
 
-      if (!tlsMap[tl]) {
-        tlsMap[tl] = { name: tl, site: row['Site'] || 'N/A', agents: [] };
-      }
+      const tlName = tl ? tl.toString().trim() : "Sin TL";
+      if (!tlsMap[tlName]) tlsMap[tlName] = { name: tlName, site, agents: [] };
 
-      tlsMap[tl].agents.push({
-        n: row['Agent'] || 'Unknown',
-        site: row['Site'],
-        tlName: tl,
+      const parse = (v) => {
+        if (!v) return null;
+        const n = parseFloat(v.toString().replace(/[%, ]/g, ""));
+        return isNaN(n) ? null : n;
+      };
+
+      tlsMap[tlName].agents.push({
+        n: agent,
+        tlName: tlName,
         w: [
-          parseNum(row['Week 1']), parseNum(row['Week 2']), parseNum(row['Week 3']),
-          parseNum(row['Week 4']), parseNum(row['Week 5']), parseNum(row['Week 6']), parseNum(row['Week 7'])
+          parse(getVal(row, ['Week 1', 'W1'])), parse(getVal(row, ['Week 2', 'W2'])),
+          parse(getVal(row, ['Week 3', 'W3'])), parse(getVal(row, ['Week 4', 'W4'])),
+          parse(getVal(row, ['Week 5', 'W5'])), parse(getVal(row, ['Week 6', 'W6'])),
+          parse(getVal(row, ['Week 7', 'W7']))
         ],
         sc: {
-          WW: parseNum(row['WW']), TL: parseNum(row['TL']), RB: parseNum(row['RB']),
-          VT: parseNum(row['VT']), AI: parseNum(row['AI']), OW: parseNum(row['OW']),
-          SS: parseNum(row['SS']), AP: parseNum(row['AP']), PR: parseNum(row['PR']),
-          LV: parseNum(row['LV'])
+          WW: parse(row['WW']), TL: parse(row['TL']), AI: parse(row['AI']), VT: parse(row['VT'])
         }
       });
-    }
+    });
     return { tls: Object.values(tlsMap) };
   };
 
-  // --- CÁLCULOS DINÁMICOS ---
   const stats = useMemo(() => {
     if (!data) return null;
-    let allAgents = [];
-    data.tls.forEach(t => t.agents.forEach(a => allAgents.push(a)));
-
-    const activeInWeek = allAgents.filter(a => a.w[wIdx] !== null);
-    const critical = activeInWeek.filter(a => a.w[wIdx] < 70);
-    const convertible = activeInWeek.filter(a => a.w[wIdx] >= 70 && a.w[wIdx] < 85);
-    const top = activeInWeek.filter(a => a.w[wIdx] >= 90);
-
-    const sum = activeInWeek.reduce((s, a) => s + a.w[wIdx], 0);
-    const avg = activeInWeek.length ? (sum / activeInWeek.length).toFixed(1) : 0;
-
-    return { all: activeInWeek, critical, convertible, top, avg };
+    let all = [];
+    data.tls.forEach(t => t.agents.forEach(a => all.push(a)));
+    const active = all.filter(a => a.w[wIdx] !== null);
+    const critical = active.filter(a => a.w[wIdx] < 70);
+    const conv = active.filter(a => a.w[wIdx] >= 70 && a.w[wIdx] < 85);
+    const top = active.filter(a => a.w[wIdx] >= 90);
+    const avg = active.length ? (active.reduce((s, a) => s + a.w[wIdx], 0) / active.length).toFixed(1) : 0;
+    return { all, active, critical, conv, top, avg };
   }, [data, wIdx]);
 
-  if (loading) return (
-    <div style={{background:C.bg, color:C.blue, height:'100vh', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'monospace'}}>
-      <div style={{textAlign:'center'}}>
-        <div style={{fontSize:20, fontWeight:800, letterSpacing:2, marginBottom:10}}>SYNCING LIVE DATA</div>
-        <div style={{color:C.dim, fontSize:10}}>{syncInfo.toUpperCase()}</div>
-      </div>
-    </div>
-  );
+  if (loading) return <div style={{background:C.bg, color:C.blue, height:'100vh', display:'flex', justifyContent:'center', alignItems:'center', fontFamily:'monospace'}}>BUSCANDO DATOS...</div>;
 
-  const filteredList = filter === "critical" ? stats.critical : filter === "convertible" ? stats.convertible : filter === "top" ? stats.top : stats.all;
+  const list = filter === "critical" ? stats.critical : filter === "conv" ? stats.conv : filter === "top" ? stats.top : stats.active;
 
   return (
-    <div style={{background:C.bg, color:C.text, minHeight:'100vh', fontFamily:'-apple-system, sans-serif'}}>
-      {/* BARRA DE ESTADO */}
-      <div style={{padding:"8px 28px", background:C.card, borderBottom:`1px solid ${C.border}`, display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-        <div style={{fontSize:9, color:C.dim, letterSpacing:1}}>ESTADO: {syncInfo}</div>
-        <button onClick={() => {setLoading(true); fetchData(true);}} style={{background:'none', border:`1px solid ${C.muted}`, color:C.dim, fontSize:9, padding:'2px 8px', borderRadius:4, cursor:'pointer'}}>
-          ACTUALIZAR NUBE ↻
-        </button>
-      </div>
+    <div style={{background:C.bg, color:C.text, minHeight:'100vh', fontFamily:'sans-serif', padding:20}}>
+      <div style={{maxWidth:1000, margin:'0 auto'}}>
+        <div style={{display:'flex', justifyContent:'space-between', borderBottom:`1px solid ${C.border}`, pb:10, mb:20}}>
+          <h2 style={{fontSize:14}}>QA SYSTEM <span style={{color:C.blue}}>{syncInfo}</span></h2>
+          <button onClick={() => fetchData(true)} style={{background:C.card, border:`1px solid ${C.border}`, color:C.dim, fontSize:10, cursor:'pointer'}}>RECARGAR ↻</button>
+        </div>
 
-      <div style={{padding:"20px 28px", maxWidth:1200, margin:'0 auto'}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24}}>
-          <h1 style={{fontSize:16, fontWeight:800}}>QA INTELLIGENCE <span style={{color:C.blue}}>v2.1</span></h1>
-          <div style={{display:'flex', gap:4}}>
-            {[1,2,3,4,5,6,7].map((w, i) => (
-              <button key={w} onClick={() => setWIdx(i)} style={{padding:"4px 10px", borderRadius:4, border:`1px solid ${wIdx===i?C.blue:C.border}`, background:wIdx===i?`${C.blue}22`:C.bg, color:wIdx===i?C.blue:C.dim, fontSize:10, cursor:'pointer'}}>W{w}</button>
-            ))}
+        <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:10, mb:20}}>
+          <div onClick={() => setFilter('all')} style={{background:C.card, padding:15, borderRadius:5, border:`1px solid ${filter==='all'?C.blue:C.border}`, cursor:'pointer'}}>
+            <div style={{fontSize:10, color:C.dim}}>AVG</div>
+            <div style={{fontSize:20, fontWeight:'bold', color:C.blue}}>{stats.avg}%</div>
+          </div>
+          <div onClick={() => setFilter('critical')} style={{background:C.card, padding:15, borderRadius:5, border:`1px solid ${filter==='critical'?C.red:C.border}`, cursor:'pointer'}}>
+            <div style={{fontSize:10, color:C.dim}}>CRITICAL</div>
+            <div style={{fontSize:20, fontWeight:'bold', color:C.red}}>{stats.critical.length}</div>
+          </div>
+          <div onClick={() => setFilter('conv')} style={{background:C.card, padding:15, borderRadius:5, border:`1px solid ${filter==='conv'?C.orange:C.border}`, cursor:'pointer'}}>
+            <div style={{fontSize:10, color:C.dim}}>CONVERTIBLE</div>
+            <div style={{fontSize:20, fontWeight:'bold', color:C.orange}}>{stats.conv.length}</div>
+          </div>
+          <div onClick={() => setFilter('top')} style={{background:C.card, padding:15, borderRadius:5, border:`1px solid ${filter==='top'?C.green:C.border}`, cursor:'pointer'}}>
+            <div style={{fontSize:10, color:C.dim}}>TOP</div>
+            <div style={{fontSize:20, fontWeight:'bold', color:C.green}}>{stats.top.length}</div>
           </div>
         </div>
 
-        {/* INDICADORES CLAVE */}
-        <div style={{display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:14, marginBottom:24}}>
-          {[
-            { id: 'all', label: 'CAMPAIGN AVG', val: stats.avg + '%', color: C.blue },
-            { id: 'critical', label: 'CRITICAL', val: stats.critical.length, color: C.red },
-            { id: 'convertible', label: 'CONVERTIBLE', val: stats.convertible.length, color: C.orange },
-            { id: 'top', label: 'TOP PERFORMERS', val: stats.top.length, color: C.green }
-          ].map(card => (
-            <div key={card.id} onClick={() => setFilter(card.id)} style={{
-              cursor:'pointer', padding:16, background:C.card, borderRadius:8, border:`1px solid ${filter===card.id?card.color:C.border}`,
-              transition:'0.2s'
-            }}>
-              <div style={{fontSize:9, color:C.dim, fontWeight:700}}>{card.label}</div>
-              <div style={{fontSize:22, fontWeight:800, color:card.color}}>{card.val}</div>
-            </div>
+        <div style={{display:'flex', gap:5, mb:15}}>
+          {[1,2,3,4,5,6,7].map((w,i) => (
+            <button key={w} onClick={() => setWIdx(i)} style={{flex:1, padding:5, background:wIdx===i?C.blue:C.card, border:'none', color:wIdx===i?C.bg:C.text, borderRadius:3, fontSize:10, cursor:'pointer'}}>W{w}</button>
           ))}
         </div>
 
-        {/* TABLA DE ACCIÓN */}
-        <div style={{background:C.card, borderRadius:8, border:`1px solid ${C.border}`, overflow:'hidden'}}>
-          <div style={{padding:12, background:`${C.border}22`, borderBottom:`1px solid ${C.border}`, fontSize:11, fontWeight:600}}>
-            FOCO: {filter.toUpperCase()} ({filteredList.length} AGENTES)
-          </div>
-          <div style={{maxHeight:550, overflowY:'auto'}}>
-            <table style={{width:'100%', borderCollapse:'collapse', fontSize:12}}>
-              <thead style={{position:'sticky', top:0, background:C.card, zIndex:1}}>
-                <tr style={{textAlign:'left', color:C.dim, fontSize:10, borderBottom:`1px solid ${C.border}`}}>
-                  <th style={{padding:12}}>IDENTIFICACIÓN</th>
-                  <th style={{padding:12}}>SCORE</th>
-                  <th style={{padding:12}}>OPORTUNIDADES (MISSES)</th>
-                  <th style={{padding:12}}>TENDENCIA</th>
+        <div style={{background:C.card, borderRadius:5, border:`1px solid ${C.border}`, overflow:'hidden'}}>
+          <table style={{width:'100%', borderCollapse:'collapse', fontSize:12}}>
+            <thead style={{background:C.border, color:C.dim}}>
+              <tr>
+                <th style={{padding:10, textAlign:'left'}}>AGENT</th>
+                <th style={{padding:10, textAlign:'left'}}>SCORE</th>
+                <th style={{padding:10, textAlign:'left'}}>MISSES</th>
+              </tr>
+            </thead>
+            <tbody>
+              {list.map((ag, i) => (
+                <tr key={i} style={{borderBottom:`1px solid ${C.border}`}}>
+                  <td style={{padding:10}}>{ag.n}<br/><span style={{fontSize:9, color:C.dim}}>{ag.tlName}</span></td>
+                  <td style={{padding:10, fontWeight:'bold', color:ag.w[wIdx]<70?C.red:ag.w[wIdx]<85?C.orange:C.green}}>{ag.w[wIdx]}%</td>
+                  <td style={{padding:10}}>
+                    {Object.entries(ag.sc).filter(([_,v])=>v<85 && v!==null).map(([k,v])=>(
+                      <span key={k} style={{fontSize:9, color:C.red, mr:5}}>{k}:{v}% </span>
+                    ))}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {filteredList.map(ag => {
-                  const score = ag.w[wIdx];
-                  const prev = wIdx > 0 ? ag.w[wIdx-1] : null;
-                  const trend = (prev !== null && score !== null) ? (score - prev).toFixed(1) : null;
-                  const misses = Object.entries(ag.sc)
-                    .filter(([_, v]) => v !== null && v < 85)
-                    .sort((a, b) => a[1] - b[1])
-                    .slice(0, 2);
-
-                  return (
-                    <tr key={ag.n} style={{borderBottom:`1px solid ${C.border}`}}>
-                      <td style={{padding:12}}>
-                        <div style={{fontWeight:600}}>{ag.n}</div>
-                        <div style={{fontSize:9, color:C.dim}}>{ag.tlName} • {ag.site}</div>
-                      </td>
-                      <td style={{padding:12, fontWeight:800, color: score < 70 ? C.red : score < 85 ? C.orange : C.green}}>
-                        {score}%
-                      </td>
-                      <td style={{padding:12}}>
-                        <div style={{display:'flex', gap:4}}>
-                          {misses.map(([m, v]) => (
-                            <div key={m} style={{padding:'2px 5px', background:`${C.red}10`, border:`1px solid ${C.red}30`, borderRadius:4, fontSize:9}}>
-                              <span style={{color:C.dim}}>{m}:</span> <span style={{color:C.red}}>{v}%</span>
-                            </div>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={{padding:12, fontSize:10, fontWeight:700}}>
-                        {trend !== null ? (
-                          <span style={{color: trend >= 0 ? C.green : C.red}}>
-                            {trend >= 0 ? `▲ +${trend}` : `▼ ${trend}`}%
-                          </span>
-                        ) : '--'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
