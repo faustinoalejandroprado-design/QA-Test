@@ -871,6 +871,18 @@ export default function QASystem(){
     setRefreshing(false);
   },[config,refreshing]);
 
+  // ALL hooks must be above this line — no hooks after conditional returns
+  const filteredTLs=useMemo(()=>{
+    if(!D)return[];
+    return site==="all"?D.tls:D.tls.filter(t=>t.site===site);
+  },[site,data]);
+
+  const handleTLChange=useCallback(e=>{
+    const v=e.target.value;
+    if(v===""){setSelTL(null);setSelAgent(null);}
+    else{const tl=filteredTLs[+v];if(tl){setSelTL(tl);setSelAgent(null);setShowQA(false);}}
+  },[filteredTLs]);
+
   // Show setup screen if user explicitly requests it
   if(showSetup) return <SetupScreen savedConfig={config} onDataReady={(d,cfg)=>{setData(d);setConfig(cfg);setWIdx(d.weeks.length-1);setLastUpdated(new Date());setShowSetup(false);}}/>;
 
@@ -887,9 +899,8 @@ export default function QASystem(){
       }
     </div>
     <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
-  </div>;;
+  </div>;
 
-  const filteredTLs=useMemo(()=>site==="all"?D.tls:D.tls.filter(t=>t.site===site),[site]);
   const level=selAgent?"agent":selTL?"tl":"campaign";
 
   const crumbs=[{label:"Campaign",onClick:()=>{setSelTL(null);setSelAgent(null);setShowQA(false);}}];
@@ -900,13 +911,6 @@ export default function QASystem(){
   function navToAgent(a){setSelAgent(a);}
 
   const sel={fontSize:12,background:C.bg,border:`1px solid ${C.border}`,borderRadius:6,color:C.text,padding:"6px 10px",fontFamily:"monospace",cursor:"pointer",outline:"none"};
-
-  // FIX: TL dropdown uses filteredTLs.indexOf for correct mapping
-  const handleTLChange=useCallback(e=>{
-    const v=e.target.value;
-    if(v===""){setSelTL(null);setSelAgent(null);}
-    else{const tl=filteredTLs[+v];if(tl)navToTL(tl);}
-  },[filteredTLs]);
 
   return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,-apple-system,sans-serif"}}>
     <div style={{background:C.panel,borderBottom:`1px solid ${C.border}`,padding:"16px 28px"}}>
