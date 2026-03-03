@@ -1,6 +1,5 @@
-import { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Papa from "papaparse";
-import * as XLSX from "xlsx";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, ReferenceLine } from "recharts";
 
 let D=null;
@@ -27,20 +26,19 @@ function getWeekStart(dateStr){
   return new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),diff)).toISOString().substring(0,10);
 }
 
-function processFiles(csvText,xlsxBuffer){
+function processFiles(csvText,rosterTabs){
   const csv=Papa.parse(csvText,{header:true,skipEmptyLines:true});
 
-  const wb=XLSX.read(new Uint8Array(xlsxBuffer),{type:"array"});
+  // rosterTabs = {leadership:csvText, ccMexico:csvText, ccJamaica:csvText, act:csvText}
 
-  // 1. Build TL map from Leadership sheet
+  // 1. Build TL map from Leadership tab
   const tlMap={};
-  if(wb.Sheets["Leadership"]){
-    XLSX.utils.sheet_to_json(wb.Sheets["Leadership"]).forEach(row=>{
+  if(rosterTabs.leadership){
+    Papa.parse(rosterTabs.leadership,{header:true,skipEmptyLines:true}).data.forEach(row=>{
       const email=(row["Email"]||"").toString().trim().toLowerCase();
       const name=row["Full Name"]||"";
       const role=(row["Role"]||"").toString();
       const location=(row["Location"]||"").toString();
-      const status=(row["Status (Active/Term)"]||"").toString();
       if(email&&name&&role.includes("Team Lead")){
         const site=location.includes("Mexico")?"HMO":location.includes("Jamaica")?"JAM":"PAN";
         tlMap[email]={name,location,site};
@@ -48,20 +46,11 @@ function processFiles(csvText,xlsxBuffer){
     });
   }
 
-  // 2. Build QA analyst set from Leadership
-  const qaSet=new Set();
-  if(wb.Sheets["Leadership"]){
-    XLSX.utils.sheet_to_json(wb.Sheets["Leadership"]).forEach(row=>{
-      const role=(row["Role"]||"").toString();
-      if(role==="QA") qaSet.add((row["Email"]||"").toString().trim().toLowerCase());
-    });
-  }
-
-  // 3. Build agent -> supervisor email mapping from roster sheets
+  // 2. Build agent -> supervisor email mapping from roster tabs
   const agentSup={};
-  ["CC MEXICO","CC JAMAICA","ADVANCE CARE TEAM"].forEach(sn=>{
-    if(!wb.Sheets[sn])return;
-    XLSX.utils.sheet_to_json(wb.Sheets[sn]).forEach(row=>{
+  [rosterTabs.ccMexico,rosterTabs.ccJamaica,rosterTabs.act].forEach(tabCsv=>{
+    if(!tabCsv)return;
+    Papa.parse(tabCsv,{header:true,skipEmptyLines:true}).data.forEach(row=>{
       const email=(row["Email"]||"").toString().trim().toLowerCase();
       const supervisor=(row["Supervisor"]||"").toString().trim().toLowerCase();
       if(email&&supervisor) agentSup[email]=supervisor;
@@ -178,7 +167,7 @@ function processFiles(csvText,xlsxBuffer){
 
 
 // =================================================================
-// COMPUTATION ENGINE (v3.0 — all bugs fixed)
+// COMPUTATION ENGINE (v3.1 — all bugs fixed)
 // =================================================================
 function getAgentAvg(a,wIdx){return a.w[wIdx];}
 function getAgentTrend(a,wIdx){
@@ -664,89 +653,143 @@ function QAIntelView({wIdx}){
 
 
 // =================================================================
-// UPLOAD SCREEN
+// GOOGLE SHEETS FETCH ENGINE
 // =================================================================
-function UploadScreen({onDataReady}){
-  const[csvFile,setCsvFile]=useState(null);
-  const[rosterFile,setRosterFile]=useState(null);
-  const[processing,setProcessing]=useState(false);
-  const[error,setError]=useState(null);
-  const[stats,setStats]=useState(null);
+const DEFAULT_QA_SHEET="1tH-SwH7OAdMSU-odErm6h8TF2kxCJN1veJ9fhmCzEJU";
+const DEFAULT_ROSTER_SHEET="1oY85yRMRQCTsWxzvH43aJsmWsWxLH6PS";
+const ROSTER_TABS=["Leadership","CC MEXICO","CC JAMAICA","ADVANCE CARE TEAM"];
+const REFRESH_INTERVAL=12*60*60*1000; // 12 hours in ms
 
-  const handleDrop=(setter)=>(e)=>{
-    e.preventDefault();e.stopPropagation();
-    e.currentTarget.style.borderColor=C.border;
-    const file=e.dataTransfer?.files?.[0]||e.target?.files?.[0];
-    if(file)setter(file);
-  };
-  const handleDragOver=(e)=>{e.preventDefault();e.currentTarget.style.borderColor=C.cyan;};
-  const handleDragLeave=(e)=>{e.currentTarget.style.borderColor=C.border;};
+function sheetCsvUrl(sheetId,tabName){
+  const base=`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv`;
+  return tabName?`${base}&sheet=${encodeURIComponent(tabName)}`:base;
+}
 
-  const handleProcess=async()=>{
-    if(!csvFile||!rosterFile)return;
-    setProcessing(true);setError(null);
+async function fetchFromSheets(qaSheetId,rosterSheetId){
+  // Fetch QA data CSV
+  const qaResp=await fetch(sheetCsvUrl(qaSheetId));
+  if(!qaResp.ok) throw new Error(`Failed to fetch QA data (${qaResp.status}). Make sure the sheet is shared as "Anyone with the link".`);
+  const qaText=await qaResp.text();
+
+  // Fetch roster tabs as CSVs
+  const tabKeys=["leadership","ccMexico","ccJamaica","act"];
+  const rosterTabs={};
+  for(let i=0;i<ROSTER_TABS.length;i++){
     try{
-      const csvText=await csvFile.text();
-      const xlsxBuf=await rosterFile.arrayBuffer();
-      const result=processFiles(csvText,xlsxBuf);
-      if(result.error){setError(result.error);setProcessing(false);return;}
-      setStats(result.stats);
-      setTimeout(()=>onDataReady(result),800);
+      const resp=await fetch(sheetCsvUrl(rosterSheetId,ROSTER_TABS[i]));
+      if(resp.ok) rosterTabs[tabKeys[i]]=await resp.text();
+    }catch(e){
+      console.warn(`Could not fetch tab: ${ROSTER_TABS[i]}`,e);
+    }
+  }
+
+  if(!rosterTabs.leadership) throw new Error('Could not fetch Leadership tab from roster. Check the Sheet ID and sharing settings.');
+
+  return processFiles(qaText,rosterTabs);
+}
+
+function extractSheetId(input){
+  if(!input)return"";
+  const s=input.trim();
+  // If it's a full URL, extract the ID
+  const match=s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
+  if(match)return match[1];
+  // Otherwise assume it's already an ID
+  return s;
+}
+
+// =================================================================
+// SETUP SCREEN
+// =================================================================
+function SetupScreen({onDataReady,savedConfig}){
+  const[qaId,setQaId]=useState(savedConfig?.qaId||"");
+  const[rosterId,setRosterId]=useState(savedConfig?.rosterId||"");
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState(null);
+  const[step,setStep]=useState(0);
+
+  // Auto-fetch if config exists
+  const autoFetched=React.useRef(false);
+  React.useEffect(()=>{
+    if(savedConfig?.qaId&&savedConfig?.rosterId&&!autoFetched.current){
+      autoFetched.current=true;
+      handleConnect(savedConfig.qaId,savedConfig.rosterId);
+    }
+  },[]);
+
+  const handleConnect=async(qId,rId)=>{
+    const q=extractSheetId(qId||qaId);
+    const r=extractSheetId(rId||rosterId);
+    if(!q||!r){setError("Both Sheet IDs are required.");return;}
+    setLoading(true);setError(null);
+    try{
+      const result=await fetchFromSheets(q,r);
+      if(result.error){setError(result.error);setLoading(false);return;}
+      // Save config in URL hash for persistence
+      window.location.hash=`qa=${q}&roster=${r}`;
+      onDataReady(result,{qaId:q,rosterId:r});
     }catch(err){
-      setError("Processing failed: "+err.message);setProcessing(false);
+      setError(err.message);setLoading(false);
     }
   };
 
-  const dropZone=(label,file,setter,accept)=>(
-    <div onDrop={handleDrop(setter)} onDragOver={handleDragOver} onDragLeave={handleDragLeave}
-      style={{flex:1,minWidth:250,border:`2px dashed ${file?C.green:C.border}`,borderRadius:12,padding:32,textAlign:"center",cursor:"pointer",transition:"border-color .2s",background:file?`${C.green}06`:C.card}}
-      onClick={()=>{const inp=document.createElement("input");inp.type="file";inp.accept=accept;inp.onchange=e=>{if(e.target.files[0])setter(e.target.files[0]);};inp.click();}}>
-      <div style={{fontSize:28,marginBottom:8,opacity:.4}}>{file?"\u2713":"\u2191"}</div>
-      <div style={{fontSize:12,fontWeight:600,color:file?C.green:C.text,marginBottom:4}}>{file?file.name:label}</div>
-      <div style={{fontSize:10,color:C.dim}}>{file?`${(file.size/1024).toFixed(0)} KB`:"Drag & drop or click to select"}</div>
-    </div>
-  );
+  const inputStyle={width:"100%",padding:"10px 14px",background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,color:C.text,fontSize:12,fontFamily:"monospace",outline:"none",boxSizing:"border-box"};
+
+  const steps=[
+    {n:"1",title:"Upload files to Google Drive",desc:"Upload your QA Reviews CSV and Roster XLSX to Google Drive. Right-click each file \u2192 Open with \u2192 Google Sheets."},
+    {n:"2",title:"Share both sheets",desc:"On each Google Sheet: click Share \u2192 change to \"Anyone with the link\" \u2192 Viewer \u2192 Done."},
+    {n:"3",title:"Copy the Sheet IDs",desc:"The Sheet ID is the long string in the URL between /d/ and /edit. Example: docs.google.com/spreadsheets/d/THIS_PART_HERE/edit"},
+  ];
 
   return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,-apple-system,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40}}>
-    <div style={{maxWidth:700,width:"100%"}}>
+    <div style={{maxWidth:600,width:"100%"}}>
       <div style={{textAlign:"center",marginBottom:32}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:8}}>
           <div style={{width:8,height:8,borderRadius:"50%",background:C.cyan,boxShadow:`0 0 12px ${C.cyan}66`}}/>
-          <span style={{fontSize:9,fontWeight:600,letterSpacing:"2px",textTransform:"uppercase",color:C.cyan}}>Data Upload</span>
+          <span style={{fontSize:9,fontWeight:600,letterSpacing:"2px",textTransform:"uppercase",color:C.cyan}}>Connect to Google Sheets</span>
         </div>
         <h1 style={{fontSize:24,fontWeight:700,margin:"0 0 6px"}}>QA Performance System</h1>
-        <p style={{fontSize:11,color:C.dim,fontFamily:"monospace",margin:0}}>Phase 2 {"\u00b7"} Drop your files to generate the dashboard</p>
+        <p style={{fontSize:11,color:C.dim,fontFamily:"monospace",margin:0}}>Phase 2 {"\u00b7"} Live data from Google Drive {"\u00b7"} Auto-refresh every 12h</p>
       </div>
 
-      <div style={{display:"flex",gap:16,marginBottom:24,flexWrap:"wrap"}}>
-        {dropZone("QA Reviews CSV (.csv)",csvFile,setCsvFile,".csv")}
-        {dropZone("Roster (.xlsx)",rosterFile,setRosterFile,".xlsx,.xls")}
+      {/* Setup steps */}
+      <div style={{marginBottom:24}}>
+        {steps.map((s,i)=><div key={i} onClick={()=>setStep(step===i?-1:i)} style={{...cs,marginBottom:8,cursor:"pointer",borderLeft:`3px solid ${C.cyan}33`,padding:"12px 16px"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:14,fontWeight:700,color:C.cyan,fontFamily:"monospace"}}>{s.n}</span>
+            <span style={{fontSize:12,fontWeight:600,color:C.text}}>{s.title}</span>
+          </div>
+          {step===i&&<p style={{fontSize:11,color:C.dim,margin:"8px 0 0 24px",lineHeight:1.6}}>{s.desc}</p>}
+        </div>)}
+      </div>
+
+      {/* ID inputs */}
+      <div style={{marginBottom:12}}>
+        <label style={{fontSize:10,fontWeight:600,color:C.dim,letterSpacing:"0.5px",display:"block",marginBottom:4}}>QA REVIEWS SHEET (paste URL or ID)</label>
+        <input value={qaId} onChange={e=>setQaId(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/abc123.../edit  or just  abc123..." style={inputStyle}/>
+      </div>
+      <div style={{marginBottom:20}}>
+        <label style={{fontSize:10,fontWeight:600,color:C.dim,letterSpacing:"0.5px",display:"block",marginBottom:4}}>ROSTER SHEET (paste URL or ID)</label>
+        <input value={rosterId} onChange={e=>setRosterId(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/xyz789.../edit  or just  xyz789..." style={inputStyle}/>
       </div>
 
       {error&&<div style={{background:`${C.red}12`,border:`1px solid ${C.red}30`,borderRadius:8,padding:"10px 14px",marginBottom:16}}>
         <span style={{fontSize:11,color:C.red}}>{error}</span>
       </div>}
 
-      {stats&&<div style={{background:`${C.green}08`,border:`1px solid ${C.green}30`,borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",gap:16,justifyContent:"center"}}>
-        {[["Interactions",stats.interactions],["Agents",stats.agents],["Team Leads",stats.tlCount],["Weeks",stats.weekCount]].map(([l,v],i)=>
-          <div key={i} style={{textAlign:"center"}}>
-            <div style={{fontSize:16,fontWeight:700,color:C.green,fontFamily:"monospace"}}>{v}</div>
-            <div style={{fontSize:9,color:C.dim}}>{l}</div>
-          </div>)}
-      </div>}
-
-      <button onClick={handleProcess} disabled={!csvFile||!rosterFile||processing}
+      <button onClick={()=>handleConnect()} disabled={!qaId||!rosterId||loading}
         style={{width:"100%",padding:"14px 0",borderRadius:8,border:"none",
-          background:csvFile&&rosterFile&&!processing?`linear-gradient(135deg,${C.cyan},${C.blue})`:C.muted,
-          color:csvFile&&rosterFile?C.text:`${C.text}66`,fontSize:13,fontWeight:700,cursor:csvFile&&rosterFile&&!processing?"pointer":"not-allowed",
+          background:qaId&&rosterId&&!loading?`linear-gradient(135deg,${C.cyan},${C.blue})`:C.muted,
+          color:qaId&&rosterId?C.text:`${C.text}66`,fontSize:13,fontWeight:700,
+          cursor:qaId&&rosterId&&!loading?"pointer":"not-allowed",
           letterSpacing:"1px",textTransform:"uppercase",transition:"all .2s"}}>
-        {processing?"Processing...":"Process & Launch Dashboard"}
+        {loading?"Connecting to Google Sheets...":"Connect & Launch"}
       </button>
 
-      <div style={{textAlign:"center",marginTop:20}}>
+      <div style={{textAlign:"center",marginTop:16}}>
         <p style={{fontSize:10,color:C.muted,lineHeight:1.6,margin:0}}>
-          CSV: AgentConnect QA Reviews export {"\u00b7"} XLSX: SSG General Roster<br/>
-          All processing happens in your browser {"\u00b7"} No data leaves your machine
+          Sheets must be shared as "Anyone with the link" {"\u00b7"} All processing in your browser<br/>
+          Sheet IDs are saved in the URL for easy bookmarking
         </p>
       </div>
     </div>
@@ -758,11 +801,25 @@ function UploadScreen({onDataReady}){
 // =================================================================
 export default function QASystem(){
   const[data,setData]=useState(null);
+  const[config,setConfig]=useState(()=>{
+    // Check URL hash for custom overrides, otherwise use defaults
+    const h=window.location.hash.substring(1);
+    const params=new URLSearchParams(h);
+    const qa=params.get("qa")||DEFAULT_QA_SHEET;
+    const roster=params.get("roster")||DEFAULT_ROSTER_SHEET;
+    return{qaId:qa,rosterId:roster};
+  });
   const[wIdx,setWIdx]=useState(0);
   const[site,setSite]=useState("all");
   const[selTL,setSelTL]=useState(null);
   const[selAgent,setSelAgent]=useState(null);
   const[showQA,setShowQA]=useState(false);
+  const[lastUpdated,setLastUpdated]=useState(null);
+  const[refreshing,setRefreshing]=useState(false);
+  const[loadError,setLoadError]=useState(null);
+  const[showSetup,setShowSetup]=useState(false);
+  const intervalRef=React.useRef(null);
+  const initialLoad=React.useRef(false);
 
   // Set module-level D when data is loaded
   if(data&&data!==D){
@@ -771,8 +828,66 @@ export default function QASystem(){
     LATEST_WIDX=WEEKS.length-1;
   }
 
-  // Show upload screen if no data loaded
-  if(!D) return <UploadScreen onDataReady={(d)=>{setData(d);setWIdx(d.weeks.length-1);}}/>;
+  // Auto-fetch on first mount
+  React.useEffect(()=>{
+    if(initialLoad.current||!config)return;
+    initialLoad.current=true;
+    (async()=>{
+      try{
+        const result=await fetchFromSheets(config.qaId,config.rosterId);
+        if(result.error){setLoadError(result.error);return;}
+        D=result;WEEKS=result.weeks;LATEST_WIDX=WEEKS.length-1;
+        setData(result);setWIdx(result.weeks.length-1);setLastUpdated(new Date());
+      }catch(e){setLoadError(e.message);}
+    })();
+  },[config]);
+
+  // Auto-refresh every 12 hours
+  React.useEffect(()=>{
+    if(!config)return;
+    intervalRef.current=setInterval(async()=>{
+      try{
+        const result=await fetchFromSheets(config.qaId,config.rosterId);
+        if(!result.error){
+          D=result;WEEKS=result.weeks;LATEST_WIDX=WEEKS.length-1;
+          setData(result);setLastUpdated(new Date());
+        }
+      }catch(e){console.warn("Auto-refresh failed:",e);}
+    },REFRESH_INTERVAL);
+    return()=>clearInterval(intervalRef.current);
+  },[config]);
+
+  // Manual refresh handler
+  const handleRefresh=useCallback(async()=>{
+    if(!config||refreshing)return;
+    setRefreshing(true);
+    try{
+      const result=await fetchFromSheets(config.qaId,config.rosterId);
+      if(!result.error){
+        D=result;WEEKS=result.weeks;LATEST_WIDX=WEEKS.length-1;
+        setData(result);setLastUpdated(new Date());setWIdx(result.weeks.length-1);
+      }
+    }catch(e){console.error("Refresh failed:",e);}
+    setRefreshing(false);
+  },[config,refreshing]);
+
+  // Show setup screen if user explicitly requests it
+  if(showSetup) return <SetupScreen savedConfig={config} onDataReady={(d,cfg)=>{setData(d);setConfig(cfg);setWIdx(d.weeks.length-1);setLastUpdated(new Date());setShowSetup(false);}}/>;
+
+  // Loading screen on first open
+  if(!D) return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"system-ui,-apple-system,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+    <div style={{textAlign:"center"}}>
+      <div style={{width:8,height:8,borderRadius:"50%",background:C.cyan,boxShadow:`0 0 12px ${C.cyan}66`,margin:"0 auto 12px",animation:"pulse 1.5s infinite"}}/>
+      <h1 style={{fontSize:20,fontWeight:700,margin:"0 0 8px"}}>QA Performance System</h1>
+      {loadError?<>
+        <p style={{fontSize:12,color:C.red,margin:"0 0 16px",maxWidth:400}}>{loadError}</p>
+        <button onClick={()=>setShowSetup(true)} style={{padding:"8px 20px",borderRadius:6,border:`1px solid ${C.cyan}`,background:"transparent",color:C.cyan,fontSize:11,cursor:"pointer"}}>Configure Sheet IDs</button>
+      </>:
+        <p style={{fontSize:11,color:C.dim,fontFamily:"monospace",margin:0}}>Connecting to Google Sheets...</p>
+      }
+    </div>
+    <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
+  </div>;;
 
   const filteredTLs=useMemo(()=>site==="all"?D.tls:D.tls.filter(t=>t.site===site),[site]);
   const level=selAgent?"agent":selTL?"tl":"campaign";
@@ -823,8 +938,12 @@ export default function QASystem(){
           <button onClick={()=>{setShowQA(!showQA);if(!showQA){setSelTL(null);setSelAgent(null);}}} style={{...sel,background:showQA?`${C.purple}15`:C.bg,borderColor:showQA?`${C.purple}44`:C.border,color:showQA?C.purple:C.dim}}>
             QA Intel
           </button>
-          <button onClick={()=>{D=null;WEEKS=[];LATEST_WIDX=0;setData(null);setSelTL(null);setSelAgent(null);setShowQA(false);}} style={{...sel,color:C.muted,fontSize:10}} title="Upload new data">
-            {"↻"} New Data
+          <button onClick={handleRefresh} disabled={refreshing} style={{...sel,color:refreshing?C.amber:C.cyan,fontSize:10,borderColor:refreshing?`${C.amber}44`:C.border}} title="Refresh data from Google Sheets">
+            {refreshing?"\u23f3 Refreshing...":"\u21bb Refresh"}
+          </button>
+          {lastUpdated&&<span style={{fontSize:8,color:C.muted,fontFamily:"monospace",alignSelf:"center"}}>Updated {lastUpdated.toLocaleTimeString()}</span>}
+          <button onClick={()=>{setShowSetup(true);}} style={{...sel,color:C.muted,fontSize:9}} title="Change Google Sheet IDs">
+            {"\u2699"}
           </button>
         </div>
       </div>
@@ -843,7 +962,7 @@ export default function QASystem(){
        <CampaignView wIdx={wIdx} onSelectTL={navToTL}/>}
     </div>
     <div style={{padding:"14px 28px",textAlign:"center",borderTop:`1px solid ${C.border}`}}>
-      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>QA Performance System v3.0 {"\u00b7"} Phase 2 {"\u00b7"} Rules Engine {"\u00b7"} 7 weeks {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
+      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>QA Performance System v3.2 {"\u00b7"} Phase 2 {"\u00b7"} Live Google Sheets {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
     <style>{`*{box-sizing:border-box;margin:0}::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:rgba(255,255,255,.08);border-radius:3px}select option{background:${C.bg};color:${C.text}}button{font-family:inherit}`}</style>
   </div>;
