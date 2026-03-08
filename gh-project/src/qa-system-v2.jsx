@@ -661,7 +661,7 @@ function InteractionModal({interactions,onClose}){
 // =================================================================
 // AGENT PROFILE PANEL
 // =================================================================
-function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,onClose,onViewInteraction}){
+function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction}){
   if(!agent)return null;
   const risk=getRiskLevel(agent,wIdx);
   const strengths=getStrengths(agent);
@@ -669,6 +669,13 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,onClo
   const agentInts=(interactions||[]).filter(i=>i.agent===agent.n);
   const survey=surveyData?.agents?.[agent.n];
   const trendData=agent.w.map((v,i)=>v!=null?{wk:WEEKS[i],score:v}:null).filter(Boolean);
+
+  // Filter survey entries by selected week
+  const selectedWeekISO=weekISO?.[wIdx]||"";
+  const weekEntries=(survey?.entries||[]).filter(e=>e.date&&getWeekStart(e.date)===selectedWeekISO);
+  const weekRatings=weekEntries.filter(e=>e.rating!=null).map(e=>e.rating);
+  const weekAvg=weekRatings.length?+(weekRatings.reduce((s,v)=>s+v,0)/weekRatings.length).toFixed(1):null;
+  const weekComments=weekEntries.filter(e=>e.comment).map(e=>e.comment);
 
   return <div style={{width:420,minWidth:420,background:C.panel,borderLeft:"1px solid "+C.border,
     overflowY:"auto",padding:24,height:"calc(100vh - 120px)",position:"sticky",top:0}}>
@@ -681,7 +688,8 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,onClo
       <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:18,cursor:"pointer"}}>{"\u2715"}</button>
     </div>
     <div style={{display:"flex",gap:8,marginBottom:16}}>
-      <div style={{...cs,flex:1,textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,fontFamily:"monospace",color:(agent.w[wIdx]||0)>=GOAL?C.green:C.amber}}>{agent.w[wIdx]||"--"}</div><div style={{fontSize:9,color:C.dim}}>Current</div></div>
+      <div style={{...cs,flex:1,textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,fontFamily:"monospace",color:(agent.w[wIdx]||0)>=GOAL?C.green:C.amber}}>{agent.w[wIdx]||"--"}</div><div style={{fontSize:9,color:C.dim}}>QA Score</div></div>
+      <div style={{...cs,flex:1,textAlign:"center"}}><div style={{fontSize:18,fontWeight:800,fontFamily:"monospace",color:weekAvg!=null?(weekAvg>=4?C.green:weekAvg>=3?C.amber:C.red):C.dim}}>{weekAvg!=null?weekAvg+"\u2605":"--"}</div><div style={{fontSize:9,color:C.dim}}>CSAT</div></div>
       <div style={{...cs,flex:1,textAlign:"center"}}><RiskBadge level={risk.level}/><div style={{fontSize:9,color:C.dim,marginTop:4}}>Risk</div></div>
       <div style={{...cs,flex:1,textAlign:"center"}}><div style={{fontSize:14,fontWeight:700,fontFamily:"monospace"}}>{agentInts.length}</div><div style={{fontSize:9,color:C.dim}}>Evals</div></div>
     </div>
@@ -728,11 +736,19 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,onClo
       </div>)}
     </div>
     {survey&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.purple}}>
-      <div style={{fontSize:10,fontWeight:600,color:C.purple,marginBottom:6}}>Survey Insights</div>
-      <div style={{display:"flex",gap:16}}>
-        <div><span style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:C.purple}}>{survey.surveys}</span><span style={{fontSize:10,color:C.dim}}> surveys</span></div>
-        {survey.avgRating&&<div><span style={{fontSize:16,fontWeight:700,fontFamily:"monospace",color:C.purple}}>{survey.avgRating}</span><span style={{fontSize:10,color:C.dim}}> avg {"\u2605"}</span></div>}
+      <div style={{fontSize:10,fontWeight:600,color:C.purple,marginBottom:6}}>CSAT — {WEEKS[wIdx]||"Selected Week"}</div>
+      <div style={{display:"flex",gap:16,marginBottom:4}}>
+        <div><span style={{fontSize:18,fontWeight:700,fontFamily:"monospace",color:weekAvg!=null?(weekAvg>=4?C.green:weekAvg>=3?C.amber:C.red):C.dim}}>{weekAvg!=null?weekAvg:"--"}</span><span style={{fontSize:10,color:C.dim}}> {"\u2605"} this week</span></div>
+        <div><span style={{fontSize:12,fontWeight:600,fontFamily:"monospace",color:C.dim}}>{weekRatings.length}</span><span style={{fontSize:10,color:C.dim}}> surveys</span></div>
       </div>
+      <div style={{fontSize:9,color:C.muted,marginBottom:4}}>All-time: {survey.avgRating||"--"}{"\u2605"} ({survey.surveys} surveys)</div>
+      {weekComments.length>0&&<div style={{marginTop:6}}>
+        <div style={{fontSize:9,color:C.dim,marginBottom:3}}>Comments this week</div>
+        {weekComments.slice(0,3).map((c,i)=><div key={i} style={{fontSize:10,color:C.text,fontStyle:"italic",padding:"4px 8px",background:C.bg,borderRadius:4,marginBottom:3,lineHeight:1.4}}>
+          {"\u201c"}{c.substring(0,120)}{c.length>120?"...":""}{"\u201d"}
+        </div>)}
+      </div>}
+      {weekRatings.length===0&&<div style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>No surveys received this week</div>}
     </div>}
     
     {csatData?.agentMap?.[agent.n]&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.teal}}>
@@ -1366,7 +1382,7 @@ export default function NextSkill(){
 
         {/* AGENT PROFILE SIDE PANEL */}
     {showProfile&&selAgent&&<AgentProfilePanel agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx}
-      interactions={D.rawInts} surveyData={D.surveyData} csatData={csatData}
+      interactions={D.rawInts} surveyData={D.surveyData} csatData={csatData} weekISO={D.weekISO}
       onClose={()=>{setShowProfile(false);window.history.back();}} onViewInteraction={ints=>setModalInts(ints)}/>}
     </div>
 
