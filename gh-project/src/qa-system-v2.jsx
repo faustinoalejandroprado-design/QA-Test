@@ -82,13 +82,15 @@ function processFiles(csvText,rosterTabs){
         channel:(r["Channel"]||"").substring(0,3)||"???",
         date:r["Time Started"],sc:{},proc:null,notes:null,
         assignmentId:r["Assignment ID"]||"",interactionId:iid,
-        url:r["Interaction URL"]||""
+        url:r["Interaction URL"]||"",comments:{}
       };
     }
     const q=r["Question Text"]||"";
     if(SC_MAP[q]) interactions[iid].sc[SC_MAP[q]]=r["Answer Text"];
     if(q==="Follows Procedures") interactions[iid].proc=r["Answer Text"]==="Yes";
     if(q.includes("Notes in Gladly")) interactions[iid].notes=r["Answer Text"]==="Yes";
+    const cmt=(r["Comments"]||"").trim();
+    if(cmt&&q) interactions[iid].comments[q]=cmt;
   });
 
   // 6. Week bucketing
@@ -171,7 +173,7 @@ function processFiles(csvText,rosterTabs){
   const rawInts=Object.values(interactions).map(int=>({
     id:int.email+"_"+int.date,agent:int.agent,email:int.email,qa:int.qa,
     score:int.score,channel:int.channel,date:int.date,sc:int.sc,
-    proc:int.proc,notes:int.notes,
+    proc:int.proc,notes:int.notes,comments:int.comments||{},
     assignmentId:int.assignmentId,interactionId:int.interactionId,url:int.url
   }));
   return{weeks:weekLabels,weekISO:weeks,tls,qas,rawInts,
@@ -193,53 +195,112 @@ function processSurveys(csvText){
     const ln=(row["employee_last_name"]||"").trim();
     if(!fn)return;
     const name=fn+" "+ln;
-    if(!agents[name])agents[name]={name,surveys:0,responded:0,ratings:[],comments:[],channels:{}};
+    if(!agents[name])agents[name]={name,surveys:0,responded:0,ratings:[],comments:[],channels:[],entries:[]};
     agents[name].surveys++;
     totalSurveys++;
     const rating=parseFloat(row["star_rating_response"]);
+    const surveyUrl=(row["external_url"]||"").trim();
+    const convId=surveyUrl.split("/conversation/")[1]||"";
+    const surveyDate=(row["request_sent_at"]||"").substring(0,10);
+    const comment=(row["star_rating_comment"]||"").trim();
+    const ch=(row["channel"]||"").toLowerCase();
+    agents[name].entries.push({rating:isNaN(rating)?null:rating,comment,convId,date:surveyDate,url:surveyUrl,channel:ch});
     if(!isNaN(rating)){
       agents[name].ratings.push(rating);
       ratingSum+=rating;ratingCount++;
       agents[name].responded++;totalResponded++;
     }
-    const comment=(row["star_rating_comment"]||"").trim();
     if(comment)agents[name].comments.push(comment);
-    const ch=(row["channel"]||"").toLowerCase();
-    if(ch)agents[name].channels[ch]=(agents[name].channels[ch]||0)+1;
+    if(ch){if(!agents[name].channels.includes)agents[name].channels={};agents[name].channels[ch]=(agents[name].channels[ch]||0)+1;}
   });
   Object.values(agents).forEach(a=>{
     a.avgRating=a.ratings.length?+(a.ratings.reduce((s,v)=>s+v,0)/a.ratings.length).toFixed(1):null;
   });
-  return{agents,total:totalSurveys,avgRating:ratingCount?+(ratingSum/ratingCount).toFixed(1):0,
+  // Build conversation ID → survey map for URL correlation
+  const byConvId={};
+  Object.values(agents).forEach(a=>a.entries.forEach(e=>{
+    if(e.convId)byConvId[e.convId]={agent:a.name,rating:e.rating,comment:e.comment,date:e.date};
+  }));
+  return{agents,byConvId,total:totalSurveys,avgRating:ratingCount?+(ratingSum/ratingCount).toFixed(1):0,
     responseRate:totalSurveys?Math.round(totalResponded/totalSurveys*100):0};
 }
 
 
 
-function csatQaCorrelation(tls, surveyData) {
-  if(!surveyData?.agents || !Object.keys(surveyData.agents).length) return {findings:[], agentMap:{}};
-  const findings = [];
-  const agentMap = {};
-  tls.forEach(tl => tl.agents.forEach(a => {
-    const survey = surveyData.agents[a.n];
-    if(!survey || !survey.avgRating) return;
-    const lastScore = a.w.filter(v=>v!=null).pop();
-    agentMap[a.n] = {qaScore: lastScore, csatRating: survey.avgRating, surveys: survey.surveys,
-      comments: survey.comments, gap: lastScore!=null ? +(survey.avgRating*20 - lastScore).toFixed(1) : null};
-    // High CSAT but low QA = coaching format issue
-    if(survey.avgRating >= 4 && lastScore != null && lastScore < GOAL)
-      findings.push({agent:a.n,tl:tl.name,type:"high_csat_low_qa",severity:"insight",
-        msg:"CSAT "+survey.avgRating+"\u2605 but QA "+lastScore+" \u2014 customer happy, process gaps"});
-    // Low CSAT but high QA = soft skills issue
-    if(survey.avgRating < 3 && lastScore != null && lastScore >= GOAL)
-      findings.push({agent:a.n,tl:tl.name,type:"low_csat_high_qa",severity:"warning",
-        msg:"CSAT "+survey.avgRating+"\u2605 but QA "+lastScore+" \u2014 meets process, customer unhappy"});
-    // Both low
-    if(survey.avgRating < 3 && lastScore != null && lastScore < 60)
-      findings.push({agent:a.n,tl:tl.name,type:"both_low",severity:"critical",
-        msg:"CSAT "+survey.avgRating+"\u2605 and QA "+lastScore+" \u2014 urgent intervention needed"});
-  }));
-  return {findings: findings.sort((a,b)=>a.severity==="critical"?-1:b.severity==="critical"?1:0), agentMap};
+function extractConvId(url){return (url||"").split("/conversation/")[1]||"";}
+
+function pearsonCorrelation(xs,ys){
+  if(xs.length<3)return null;
+  const n=xs.length;
+  const mx=xs.reduce((s,v)=>s+v,0)/n, my=ys.reduce((s,v)=>s+v,0)/n;
+  let num=0,dx=0,dy=0;
+  for(let i=0;i<n;i++){num+=(xs[i]-mx)*(ys[i]-my);dx+=(xs[i]-mx)**2;dy+=(ys[i]-my)**2;}
+  const denom=Math.sqrt(dx*dy);
+  return denom===0?0:+(num/denom).toFixed(2);
+}
+
+function csatQaCorrelation(tls, surveyData, rawInts) {
+  if(!surveyData?.byConvId||!Object.keys(surveyData.byConvId).length)
+    return{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0};
+
+  // URL-based matching: QA interaction ↔ Survey response
+  const pairs=[];
+  const agentPairs={};
+  (rawInts||[]).forEach(int=>{
+    const convId=extractConvId(int.url);
+    const survey=surveyData.byConvId[convId];
+    if(survey&&survey.rating!=null){
+      pairs.push({agent:int.agent,qaScore:int.score,csatRating:survey.rating,
+        scBreakdown:int.sc,date:int.date,comment:survey.comment});
+      if(!agentPairs[int.agent])agentPairs[int.agent]=[];
+      agentPairs[int.agent].push({qaScore:int.score,csatRating:survey.rating});
+    }
+  });
+
+  // Overall Pearson correlation
+  const qScores=pairs.map(p=>p.qaScore), cScores=pairs.map(p=>p.csatRating*20);
+  const pearson=pearsonCorrelation(qScores,cScores);
+
+  // Per-category impact on CSAT
+  const categoryImpact=SCS.map(c=>{
+    const valid=pairs.filter(p=>p.scBreakdown?.[c]);
+    const xs=valid.map(p=>p.scBreakdown[c]==="Met"||p.scBreakdown[c]==="Exceed"?1:0);
+    const ys=valid.map(p=>p.csatRating);
+    return{code:c,name:SC_FULL[c],correlation:pearsonCorrelation(xs,ys),n:valid.length};
+  }).filter(c=>c.correlation!=null).sort((a,b)=>Math.abs(b.correlation)-Math.abs(a.correlation));
+
+  // Agent-level aggregation
+  const agentMap={};
+  Object.entries(agentPairs).forEach(([name,ps])=>{
+    const avgQA=+(ps.reduce((s,p)=>s+p.qaScore,0)/ps.length).toFixed(1);
+    const avgCSAT=+(ps.reduce((s,p)=>s+p.csatRating,0)/ps.length).toFixed(1);
+    agentMap[name]={qaScore:avgQA,csatRating:avgCSAT,matchedInteractions:ps.length,
+      gap:+((avgCSAT*20)-avgQA).toFixed(1)};
+  });
+
+  // Generate findings
+  const findings=[];
+  Object.entries(agentMap).forEach(([name,d])=>{
+    if(d.csatRating>=4&&d.qaScore<GOAL)
+      findings.push({agent:name,type:"high_csat_low_qa",severity:"insight",
+        msg:"CSAT "+d.csatRating+"\u2605 but QA "+d.qaScore+" \u2014 customer happy, process gaps"});
+    if(d.csatRating<3&&d.qaScore>=GOAL)
+      findings.push({agent:name,type:"low_csat_high_qa",severity:"warning",
+        msg:"CSAT "+d.csatRating+"\u2605 but QA "+d.qaScore+" \u2014 meets process, customer unhappy"});
+    if(d.csatRating<3&&d.qaScore<60)
+      findings.push({agent:name,type:"both_low",severity:"critical",
+        msg:"CSAT "+d.csatRating+"\u2605 and QA "+d.qaScore+" \u2014 urgent intervention needed"});
+  });
+
+  // Top insight from category impact
+  if(categoryImpact.length>=2){
+    const top=categoryImpact[0];
+    findings.unshift({agent:"Campaign",type:"impact_insight",severity:"insight",
+      msg:top.name+" has highest CSAT impact (r="+top.correlation+"). Prioritize coaching here."});
+  }
+
+  return{findings:findings.sort((a,b)=>a.severity==="critical"?-1:b.severity==="critical"?1:0),
+    agentMap,pairs,pearson,categoryImpact,matched:pairs.length};
 }
 
 // =================================================================
@@ -549,12 +610,26 @@ function InteractionModal({interactions,onClose}){
             <span>{lbl}</span><span style={{fontWeight:700,color:val?C.green:C.red}}>{val?"\u2713":"\u2717"}</span>
           </div>)}
       </div>
+      
+      {Object.keys(int.comments||{}).length>0&&<div style={{marginTop:12}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>QA Feedback</div>
+        {Object.entries(int.comments).map(([q,c],i)=><div key={i} style={{padding:"8px 12px",borderRadius:6,background:C.bg,marginBottom:4}}>
+          <div style={{fontSize:9,color:C.cyan,fontWeight:600,marginBottom:2}}>{q}</div>
+          <div style={{fontSize:11,color:C.text,fontStyle:"italic",lineHeight:1.5}}>{"“"}{c}{"”"}</div>
+        </div>)}
+      </div>}
       {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId}
         target="_blank" rel="noopener noreferrer"
         style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:12,padding:"8px 16px",borderRadius:6,
           background:C.cyan+"15",border:"1px solid "+C.cyan+"44",color:C.cyan,fontSize:11,fontWeight:600,
           textDecoration:"none",cursor:"pointer"}}>
         {"\u2197"} View in Stella
+      </a>}
+      {int.url&&<a href={int.url} target="_blank" rel="noopener noreferrer"
+        style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,marginLeft:8,padding:"8px 16px",borderRadius:6,
+          background:C.purple+"15",border:"1px solid "+C.purple+"44",color:C.purple,fontSize:11,fontWeight:600,
+          textDecoration:"none",cursor:"pointer"}}>
+        {"\u2197"} View in Gladly
       </a>}
     </div>
   </div>;
@@ -656,7 +731,15 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,onClo
         <span style={{fontSize:10,color:C.dim}}>{int.qa}</span>
         <span style={{fontSize:12,fontWeight:700,fontFamily:"monospace",
           color:int.score>=GOAL?C.green:int.score>=60?C.amber:C.red}}>{int.score}</span>
-        {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId}
+        
+      {Object.keys(int.comments||{}).length>0&&<div style={{marginTop:12}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>QA Feedback</div>
+        {Object.entries(int.comments).map(([q,c],i)=><div key={i} style={{padding:"8px 12px",borderRadius:6,background:C.bg,marginBottom:4}}>
+          <div style={{fontSize:9,color:C.cyan,fontWeight:600,marginBottom:2}}>{q}</div>
+          <div style={{fontSize:11,color:C.text,fontStyle:"italic",lineHeight:1.5}}>{"“"}{c}{"”"}</div>
+        </div>)}
+      </div>}
+      {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId}
           target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}
           style={{fontSize:9,color:C.cyan,textDecoration:"none"}}>{"\u2197"}</a>}
       </div>)}
@@ -956,6 +1039,86 @@ function SurveyTab({surveyData}){
   </div>;
 }
 
+
+function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
+  const[csatFilter,setCsatFilter]=useState("all");
+  const agents=Object.values(surveyData?.agents||{}).filter(a=>a.ratings.length>0);
+  const filteredAgents=csatFilter==="all"?agents:
+    csatFilter==="low"?agents.filter(a=>a.avgRating<3):
+    csatFilter==="high"?agents.filter(a=>a.avgRating>=4):agents;
+
+  return <div>
+    {/* KPIs */}
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={csatData.matched} label="Matched Interactions" color={C.teal} icon={"\ud83d\udd17"}/>
+      <KpiCard value={csatData.pearson!=null?csatData.pearson:"--"} label="QA-CSAT Correlation" color={csatData.pearson>0.3?C.green:C.amber} icon={"\ud83d\udcca"}/>
+      <KpiCard value={surveyData?.total||0} label="Total Surveys" color={C.purple} icon={"\ud83d\udce8"}/>
+      <KpiCard value={surveyData?.avgRating||"--"} label="Avg Rating" color={C.purple} icon={"\u2605"}/>
+      <KpiCard value={(surveyData?.responseRate||0)+"%"} label="Response Rate" color={C.teal}/>
+    </div>
+
+    {/* CSAT Impact Analysis */}
+    {csatData.categoryImpact.length>0&&<div style={{...cs,marginBottom:12}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>QA Impact on CSAT — Which behaviors drive customer satisfaction?</div>
+      {csatData.categoryImpact.map((c,i)=>{
+        const w=Math.max(5,Math.abs(c.correlation)*100);
+        const clr=c.correlation>0.3?C.green:c.correlation>0.1?C.teal:C.dim;
+        return <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+          <span style={{fontSize:10,color:C.dim,width:100,textAlign:"right"}}>{c.name}</span>
+          <div style={{flex:1,height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}>
+            <div style={{width:w+"%",height:"100%",borderRadius:4,background:clr,transition:"width .3s"}}/>
+          </div>
+          <span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:clr,width:40}}>{c.correlation}</span>
+          <span style={{fontSize:9,color:C.dim}}>n={c.n}</span>
+        </div>;})}
+      {csatData.categoryImpact.length>0&&<div style={{marginTop:8,fontSize:10,color:C.teal,fontStyle:"italic"}}>
+        {"\ud83d\udca1"} {csatData.categoryImpact[0].name} has the highest impact on CSAT (r={csatData.categoryImpact[0].correlation}). Prioritize coaching here.
+      </div>}
+    </div>}
+
+    {/* Findings */}
+    {csatData.findings.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.purple}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.purple,marginBottom:8}}>{"\ud83d\udcca"} QA-CSAT Insights ({csatData.matched} matched interactions)</div>
+      {csatData.findings.slice(0,8).map((f,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<Math.min(csatData.findings.length,8)-1?"1px solid "+C.border+"22":undefined,
+        display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><span style={{fontSize:11,fontWeight:600,cursor:f.agent!=="Campaign"?"pointer":"default"}}
+          onClick={()=>{if(f.agent!=="Campaign"){const t=tls.find(t=>t.agents.some(a=>a.n===f.agent));const a=t?.agents.find(x=>x.n===f.agent);if(a&&t)onSelectAgent(a,t);}}}>{f.agent}</span></div>
+        <span style={{fontSize:10,color:f.severity==="critical"?C.red:f.severity==="warning"?C.amber:C.teal}}>{f.msg}</span>
+      </div>)}
+    </div>}
+
+    {/* CSAT Filter */}
+    <div style={{display:"flex",gap:8,marginBottom:12}}>
+      {[["all","All"],["low","CSAT \u2264 3"],["high","CSAT \u2265 4"]].map(([val,label])=>
+        <button key={val} onClick={()=>setCsatFilter(val)}
+          style={{fontSize:10,padding:"4px 12px",borderRadius:4,cursor:"pointer",border:"1px solid "+(csatFilter===val?C.purple:C.border),
+            background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
+    </div>
+
+    {/* Agent Survey Table */}
+    <div style={{...cs}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+        <thead><tr style={{borderBottom:"1px solid "+C.border}}>
+          {["Agent","Surveys","Avg Rating","QA Score","Gap","Comment","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 10px",color:C.dim,fontWeight:600,fontSize:10}}>{h}</th>)}
+        </tr></thead>
+        <tbody>{filteredAgents.sort((a,b)=>(a.avgRating||0)-(b.avgRating||0)).map((a,i)=>{
+          const qaMatch=csatData.agentMap[a.name];
+          return <tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
+            <td style={{padding:"8px 10px",fontWeight:600}}>{a.name}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{a.surveys}</td>
+            <td style={{padding:"8px 10px"}}><span style={{fontWeight:700,fontFamily:"monospace",color:(a.avgRating||0)>=4?C.green:(a.avgRating||0)>=3?C.amber:C.red}}>{a.avgRating||"--"}</span> {"\u2605"}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace",color:C.dim}}>{qaMatch?.qaScore||"--"}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace",fontSize:10,color:qaMatch?.gap!=null&&Math.abs(qaMatch.gap)>15?C.amber:C.dim}}>{qaMatch?.gap!=null?(qaMatch.gap>0?"+":"")+qaMatch.gap:"--"}</td>
+            <td style={{padding:"8px 10px",fontSize:10,color:C.dim,maxWidth:180,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.comments.length?a.comments[a.comments.length-1].substring(0,60):"--"}</td>
+            <td style={{padding:"8px 10px"}}>{a.entries?.[0]?.url&&<a href={a.entries[a.entries.length-1].url} target="_blank" rel="noopener noreferrer"
+              style={{fontSize:9,color:C.purple,textDecoration:"none"}}>{"\u2197"} Gladly</a>}</td>
+          </tr>;})}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
 // =================================================================
 // LOADING & SETUP SCREENS
 // =================================================================
@@ -1044,6 +1207,7 @@ export default function NextSkill(){
   const[showSetup,setShowSetup]=useState(false);
   const[showProfile,setShowProfile]=useState(false);
   const[modalInts,setModalInts]=useState(null);
+  const[search,setSearch]=useState("");
   const intervalRef=React.useRef(null);
   const initialLoad=React.useRef(false);
 
@@ -1051,7 +1215,7 @@ export default function NextSkill(){
 
   const filteredTLs=useMemo(()=>!D?[]:site==="all"?D.tls:D.tls.filter(t=>t.site===site),[site,data]);
   const alerts=useMemo(()=>!D?[]:generateAlerts(D.tls,wIdx),[data,wIdx]);
-  const csatData=useMemo(()=>!D?{findings:[],agentMap:{}}:csatQaCorrelation(D.tls,D.surveyData),[data]);
+  const csatData=useMemo(()=>!D?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(D.tls,D.surveyData,D.rawInts),[data]);
   const handleRefresh=useCallback(async()=>{
     if(!config||refreshing)return;setRefreshing(true);
     try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
@@ -1112,6 +1276,23 @@ export default function NextSkill(){
           <select value={site} onChange={e=>{setSite(e.target.value);setSelTL(null);setSelAgent(null);}} style={sel}>
             <option value="all">All Sites</option>
             {[...new Set(D.tls.map(t=>t.site))].filter(s=>s&&s!=="???").sort().map(s=><option key={s} value={s}>{s}</option>)}</select>
+          
+          <div style={{position:"relative"}}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search agent..."
+              style={{...sel,width:160,paddingLeft:28,fontSize:10}}/>
+            <span style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:12,color:C.muted}}>{"??"}</span>
+            {search&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.panel,border:"1px solid "+C.border,borderRadius:6,maxHeight:200,overflowY:"auto",zIndex:100,marginTop:4}}>
+              {D.tls.flatMap(t=>t.agents.filter(a=>a.n.toLowerCase().includes(search.toLowerCase())).map(a=>({a,t})))
+                .slice(0,8).map(({a,t},i)=><div key={i} onClick={()=>{onSelectAgent(a,t);setSearch("");}}
+                  style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid "+C.border+"22",fontSize:11}}
+                  onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <div style={{fontWeight:600}}>{a.n}</div>
+                  <div style={{fontSize:9,color:C.dim}}>{t.name} {"·"} {t.site}</div>
+                </div>)}
+              {D.tls.flatMap(t=>t.agents.filter(a=>a.n.toLowerCase().includes(search.toLowerCase()))).length===0&&
+                <div style={{padding:"8px 12px",fontSize:10,color:C.dim}}>No agents found</div>}
+            </div>}
+          </div>
           <button onClick={handleRefresh} disabled={refreshing} style={{...sel,color:refreshing?C.amber:C.cyan}}>
             {refreshing?"\u23f3":"\u21bb"}</button>
           {lastUpdated&&<span style={{fontSize:8,color:C.muted,fontFamily:"monospace"}}>{lastUpdated.toLocaleTimeString()}</span>}
@@ -1122,7 +1303,7 @@ export default function NextSkill(){
         <TabButton label="Dashboard" active={tab==="dashboard"} onClick={()=>setTab("dashboard")}/>
         <TabButton label="Coaching" active={tab==="coaching"} onClick={()=>setTab("coaching")} badge={alerts.filter(a=>a.severity==="high").length}/>
         <TabButton label="QA Analytics" active={tab==="qa"} onClick={()=>setTab("qa")}/>
-        <TabButton label="Surveys" active={tab==="surveys"} onClick={()=>setTab("surveys")}/>
+        <TabButton label="Intelligence" active={tab==="intel"} onClick={()=>setTab("intel")}/>
       </div>
     </div>
 
@@ -1153,7 +1334,7 @@ export default function NextSkill(){
         <CampaignView wIdx={wIdx} onSelectTL={onSelectTL} onSelectAgent={onSelectAgent} catFilter={catFilter} setCatFilter={setCatFilter} csatFindings={csatData.findings} site={site} filteredTLs={filteredTLs}/>)}
       {tab==="coaching"&&<CoachingTab alerts={alerts} wIdx={wIdx} onSelectAgent={onSelectAgent} tls={D.tls}/>}
       {tab==="qa"&&<QAAnalyticsTab wIdx={wIdx}/>}
-      {tab==="surveys"&&<SurveyTab surveyData={D.surveyData}/>}
+      {tab==="intel"&&<IntelligenceTab csatData={csatData} surveyData={D.surveyData} onSelectAgent={onSelectAgent} tls={D.tls}/>}
     </div>
 
         {/* AGENT PROFILE SIDE PANEL */}
@@ -1164,7 +1345,7 @@ export default function NextSkill(){
 
     {/* FOOTER */}
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
-      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v4.2 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
+      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.0 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
 
 
