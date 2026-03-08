@@ -176,16 +176,6 @@ function processFiles(csvText,rosterTabs){
 
 
 // =================================================================
-// COMPUTATION ENGINE (v3.1 — all bugs fixed)
-// =================================================================
-function getAgentAvg(a,wIdx){return a.w[wIdx];}
-function getAgentTrend(a,wIdx){
-  const cur=a.w[wIdx],prev=wIdx>0?a.w[wIdx-1]:null;
-  if(cur==null||prev==null)return null;
-
-
-
-// =================================================================
 // SURVEY PROCESSING
 // =================================================================
 function processSurveys(csvText){
