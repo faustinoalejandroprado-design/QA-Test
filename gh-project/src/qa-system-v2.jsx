@@ -275,7 +275,7 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
     const avgQA=+(ps.reduce((s,p)=>s+p.qaScore,0)/ps.length).toFixed(1);
     const avgCSAT=+(ps.reduce((s,p)=>s+p.csatRating,0)/ps.length).toFixed(1);
     agentMap[name]={qaScore:avgQA,csatRating:avgCSAT,matchedInteractions:ps.length,
-      gap:+((avgCSAT*20)-avgQA).toFixed(1)};
+      alignment:avgCSAT>=4&&avgQA>=GOAL?"aligned":avgCSAT>=4&&avgQA<GOAL?"csat_leads":avgCSAT<3&&avgQA>=GOAL?"qa_leads":avgCSAT<3&&avgQA<60?"both_low":"neutral"};
   });
 
   // Generate findings
@@ -757,9 +757,17 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
         <div><span style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.teal}}>{csatData.agentMap[agent.n].csatRating}</span><span style={{fontSize:10,color:C.dim}}> {"\u2605"} CSAT</span></div>
         <div><span style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.cyan}}>{csatData.agentMap[agent.n].qaScore||"--"}</span><span style={{fontSize:10,color:C.dim}}> QA Score</span></div>
       </div>
-      {csatData.agentMap[agent.n].gap!=null&&<div style={{fontSize:10,color:Math.abs(csatData.agentMap[agent.n].gap)>15?C.amber:C.dim}}>
-        Gap: {csatData.agentMap[agent.n].gap>0?"+":""}{csatData.agentMap[agent.n].gap} pts {Math.abs(csatData.agentMap[agent.n].gap)>15?"\u2014 significant mismatch":""}
-      </div>}
+      {(()=>{const al=csatData.agentMap[agent.n].alignment;
+        const labels={aligned:{text:"Aligned",desc:"Customer satisfaction matches QA performance",color:C.green},
+          csat_leads:{text:"CSAT Leads",desc:"Customer is happy, but QA shows process gaps \u2014 coach on procedures",color:C.amber},
+          qa_leads:{text:"QA Leads",desc:"Meets QA standards but customer unhappy \u2014 focus on soft skills & empathy",color:C.amber},
+          both_low:{text:"Needs Attention",desc:"Both CSAT and QA are low \u2014 priority intervention",color:C.red},
+          neutral:{text:"Moderate",desc:"Metrics in mid-range",color:C.dim}};
+        const l=labels[al]||labels.neutral;
+        return <div style={{fontSize:10,display:"flex",alignItems:"center",gap:6}}>
+          <span style={{width:6,height:6,borderRadius:"50%",background:l.color}}/><span style={{color:l.color,fontWeight:600}}>{l.text}</span>
+          <span style={{color:C.dim}}>{"\u2014"} {l.desc}</span></div>;
+      })()}
     </div>}
     {agentInts.length>0&&<div style={{...cs}}>
       <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:6}}>Recent Evaluations</div>
@@ -1143,16 +1151,18 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
     <div style={{...cs}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <SortHeader columns={[["name","Agent"],["surveys","Surveys",60],["avgRating","Avg Rating",70],["qaScore","QA Score",70],["gap","Gap",50],["comment","Comment"],["actions","",50]]}
+        <SortHeader columns={[["name","Agent"],["surveys","Surveys",60],["avgRating","Avg Rating",70],["qaScore","QA Score",70],["alignment","Status",80],["comment","Comment"],["actions","",50]]}
             sortKey={intelSort.sk} sortDir={intelSort.sd} onSort={intelSort.toggle}/>
-        <tbody>{filteredAgents.map(a=>{const qm=csatData.agentMap[a.name];return{...a,qaScore:qm?.qaScore||0,gap:qm?.gap||0,comment:a.comments.length?a.comments[a.comments.length-1]:""}; })
+        <tbody>{filteredAgents.map(a=>{const qm=csatData.agentMap[a.name];return{...a,qaScore:qm?.qaScore||0,alignment:qm?.alignment||"neutral",comment:a.comments.length?a.comments[a.comments.length-1]:""}; })
           .sort((a,b)=>intelSort.sortFn(a[intelSort.sk],b[intelSort.sk])).map((a,i)=>{
           return <tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
             <td style={{padding:"8px 10px",fontWeight:600}}>{a.name}</td>
             <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{a.surveys}</td>
             <td style={{padding:"8px 10px"}}><span style={{fontWeight:700,fontFamily:"monospace",color:(a.avgRating||0)>=4?C.green:(a.avgRating||0)>=3?C.amber:C.red}}>{a.avgRating||"--"}</span> {"\u2605"}</td>
             <td style={{padding:"8px 10px",fontFamily:"monospace",color:C.dim}}>{a.qaScore||"--"}</td>
-            <td style={{padding:"8px 10px",fontFamily:"monospace",fontSize:10,color:a.gap!=null&&Math.abs(a.gap)>15?C.amber:C.dim}}>{a.gap?(a.gap>0?"+":"")+a.gap:"--"}</td>
+            <td style={{padding:"8px 10px"}}>{(()=>{const colors={aligned:C.green,csat_leads:C.amber,qa_leads:C.amber,both_low:C.red,neutral:C.dim};
+              const labels={aligned:"Aligned",csat_leads:"CSAT Leads",qa_leads:"QA Leads",both_low:"Low",neutral:"\u2014"};
+              return <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:(colors[a.alignment]||C.dim)+"18",color:colors[a.alignment]||C.dim}}>{labels[a.alignment]||"\u2014"}</span>;})()}</td>
             <td style={{padding:"8px 10px",fontSize:10,color:C.dim,maxWidth:180,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.comments.length?a.comments[a.comments.length-1].substring(0,60):"--"}</td>
             <td style={{padding:"8px 10px"}}>{a.entries?.[0]?.url&&<a href={a.entries[a.entries.length-1].url} target="_blank" rel="noopener noreferrer"
               style={{fontSize:9,color:C.purple,textDecoration:"none"}}>{"\u2197"} Gladly</a>}</td>
