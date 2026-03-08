@@ -549,6 +549,29 @@ function FocusCard({card,onClick}){
     <div style={{fontSize:10,color:C.dim,marginTop:4}}>{card.sub}</div>
   </div>;
 }
+
+function SortHeader({columns,sortKey,sortDir,onSort}){
+  return <thead><tr style={{borderBottom:"1px solid "+C.border}}>
+    {columns.map(([key,label,w])=><th key={key} onClick={()=>onSort(key)}
+      style={{textAlign:"left",padding:"6px 10px",color:sortKey===key?C.cyan:C.dim,fontWeight:600,fontSize:10,
+        cursor:"pointer",userSelect:"none",width:w||"auto",whiteSpace:"nowrap"}}>
+      {label} {sortKey===key?(sortDir==="asc"?"\u25b2":"\u25bc"):"\u25b8"}
+    </th>)}
+  </tr></thead>;
+}
+
+function useSort(defaultKey,defaultDir="desc"){
+  const[sk,setSk]=useState(defaultKey);
+  const[sd,setSd]=useState(defaultDir);
+  const toggle=(key)=>{if(sk===key)setSd(sd==="asc"?"desc":"asc");else{setSk(key);setSd("desc");}};
+  const sortFn=(a,b)=>{
+    const va=typeof a==="string"?a.toLowerCase():a??-Infinity;
+    const vb=typeof b==="string"?b.toLowerCase():b??-Infinity;
+    return sd==="asc"?(va>vb?1:va<vb?-1:0):(va<vb?1:va>vb?-1:0);
+  };
+  return{sk,sd,toggle,sortFn};
+}
+
 function RiskBadge({level}){
   const colors={HIGH:C.red,MEDIUM:C.amber,LOW:C.green};
   return <span style={{fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:10,
@@ -751,6 +774,7 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,onClo
 // DASHBOARD VIEWS
 // =================================================================
 function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csatFindings,site,filteredTLs}){
+  const tlSort=useSort("avg");
   const allAgents=filteredTLs.flatMap(t=>t.agents);
   const scored=allAgents.filter(a=>a.w[wIdx]!=null);
   const avg=scored.length?(scored.reduce((s,a)=>s+a.w[wIdx],0)/scored.length).toFixed(1):"--";
@@ -820,10 +844,10 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
         <button onClick={()=>setCatFilter(null)} style={{fontSize:10,color:C.cyan,background:"none",border:"1px solid "+C.cyan+"44",borderRadius:4,padding:"3px 10px",cursor:"pointer"}}>Show All</button>
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <thead><tr style={{borderBottom:"1px solid "+C.border}}>
-          {["Agent","Team Lead","Site","Score","Trend","Risk"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 8px",color:C.dim,fontWeight:600,fontSize:10}}>{h}</th>)}
-        </tr></thead>
-        <tbody>{filteredTLs.flatMap(t=>t.agents.filter(a=>classify(a,wIdx).cat===catFilter).map(a=>({a,t}))).sort((x,y)=>(y.a.w[wIdx]||0)-(x.a.w[wIdx]||0)).map(({a,t},i)=>{
+        <SortHeader columns={[["name","Agent"],["tl","Team Lead"],["site","Site",50],["score","Score",60],["trend","Trend",60],["risk","Risk",60]]}
+            sortKey={tlSort.sk} sortDir={tlSort.sd} onSort={tlSort.toggle}/>
+        <tbody>{filteredTLs.flatMap(t=>t.agents.filter(a=>classify(a,wIdx).cat===catFilter).map(a=>({a,t,name:a.n,tl:t.name,site:t.site,score:a.w[wIdx]||0,trend:getAgentTrend(a,wIdx)||0,risk:getRiskLevel(a,wIdx).level})))
+          .sort((x,y)=>tlSort.sortFn(x[tlSort.sk],y[tlSort.sk])).map(({a,t},i)=>{
           const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx),risk=getRiskLevel(a,wIdx);
           return <tr key={i} onClick={()=>onSelectAgent(a,t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}
             onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -861,6 +885,7 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
 }
 
 function TLView({tl,wIdx,onSelectAgent}){
+  const agSort=useSort("score");
   if(!tl)return null;
   const scored=tl.agents.filter(a=>a.w[wIdx]!=null);
   if(!scored.length)return <EmptyState message={"No evaluations for "+tl.name+" in week "+WEEKS[wIdx]}/>;
@@ -878,10 +903,12 @@ function TLView({tl,wIdx,onSelectAgent}){
     <div style={{...cs}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Rankings</div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <thead><tr style={{borderBottom:"1px solid "+C.border}}>
-          {["Agent","Score","Cat.","Trend","\u2192 72","Ch","Risk"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 8px",color:C.dim,fontWeight:600,fontSize:10}}>{h}</th>)}
-        </tr></thead>
-        <tbody>{[...tl.agents].sort((a,b)=>(b.w[wIdx]||0)-(a.w[wIdx]||0)).map((a,i)=>{
+        <SortHeader columns={[["name","Agent"],["score","Score",60],["cat","Category",80],["trend","Trend",60],["w72","\u2192 72",50],["ch","Channel",50],["risk","Risk",60]]}
+            sortKey={agSort.sk} sortDir={agSort.sd} onSort={agSort.toggle}/>
+        <tbody>{[...tl.agents].map(a=>{const c=classify(a,wIdx);return{a,name:a.n,score:a.w[wIdx]||0,cat:c.cat,
+          trend:getAgentTrend(a,wIdx)||0,w72:weeksTo72(a,wIdx)||999,ch:a.ch,risk:getRiskLevel(a,wIdx).level};})
+          .sort((x,y)=>agSort.sortFn(x[agSort.sk],y[agSort.sk]))
+          .map(({a},i)=>{
           const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx),w72=weeksTo72(a,wIdx),risk=getRiskLevel(a,wIdx);
           return <tr key={i} onClick={()=>onSelectAgent(a)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}
             onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
@@ -969,6 +996,7 @@ function CoachingTab({alerts,wIdx,onSelectAgent,tls}){
 }
 
 function QAAnalyticsTab({wIdx}){
+  const qaSort=useSort("n");
   const qaData=D.qas||[];
   return <div>
     <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
@@ -994,10 +1022,9 @@ function QAAnalyticsTab({wIdx}){
     <div style={{...cs}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Reviewer Details</div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <thead><tr style={{borderBottom:"1px solid "+C.border}}>
-          {["QA Analyst","Evals","Avg Score","Std Dev","Volatility"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 10px",color:C.dim,fontWeight:600,fontSize:10}}>{h}</th>)}
-        </tr></thead>
-        <tbody>{[...qaData].sort((a,b)=>b.n-a.n).map((q,i)=>
+        <SortHeader columns={[["name","QA Analyst"],["n","Evals",60],["avg","Avg Score",70],["sd","Std Dev",60],["vol","Volatility",70]]}
+            sortKey={qaSort.sk} sortDir={qaSort.sd} onSort={qaSort.toggle}/>
+        <tbody>{[...qaData].sort((a,b)=>qaSort.sortFn(a[qaSort.sk],b[qaSort.sk])).map((q,i)=>
           <tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
             <td style={{padding:"8px 10px",fontWeight:600}}>{q.name}</td>
             <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{q.n}</td>
@@ -1042,6 +1069,7 @@ function SurveyTab({surveyData}){
 
 function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
   const[csatFilter,setCsatFilter]=useState("all");
+  const intelSort=useSort("avgRating","asc");
   const agents=Object.values(surveyData?.agents||{}).filter(a=>a.ratings.length>0);
   const filteredAgents=csatFilter==="all"?agents:
     csatFilter==="low"?agents.filter(a=>a.avgRating<3):
@@ -1099,17 +1127,16 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
     <div style={{...cs}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <thead><tr style={{borderBottom:"1px solid "+C.border}}>
-          {["Agent","Surveys","Avg Rating","QA Score","Gap","Comment","Actions"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 10px",color:C.dim,fontWeight:600,fontSize:10}}>{h}</th>)}
-        </tr></thead>
-        <tbody>{filteredAgents.sort((a,b)=>(a.avgRating||0)-(b.avgRating||0)).map((a,i)=>{
-          const qaMatch=csatData.agentMap[a.name];
+        <SortHeader columns={[["name","Agent"],["surveys","Surveys",60],["avgRating","Avg Rating",70],["qaScore","QA Score",70],["gap","Gap",50],["comment","Comment"],["actions","",50]]}
+            sortKey={intelSort.sk} sortDir={intelSort.sd} onSort={intelSort.toggle}/>
+        <tbody>{filteredAgents.map(a=>{const qm=csatData.agentMap[a.name];return{...a,qaScore:qm?.qaScore||0,gap:qm?.gap||0,comment:a.comments.length?a.comments[a.comments.length-1]:""}; })
+          .sort((a,b)=>intelSort.sortFn(a[intelSort.sk],b[intelSort.sk])).map((a,i)=>{
           return <tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
             <td style={{padding:"8px 10px",fontWeight:600}}>{a.name}</td>
             <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{a.surveys}</td>
             <td style={{padding:"8px 10px"}}><span style={{fontWeight:700,fontFamily:"monospace",color:(a.avgRating||0)>=4?C.green:(a.avgRating||0)>=3?C.amber:C.red}}>{a.avgRating||"--"}</span> {"\u2605"}</td>
-            <td style={{padding:"8px 10px",fontFamily:"monospace",color:C.dim}}>{qaMatch?.qaScore||"--"}</td>
-            <td style={{padding:"8px 10px",fontFamily:"monospace",fontSize:10,color:qaMatch?.gap!=null&&Math.abs(qaMatch.gap)>15?C.amber:C.dim}}>{qaMatch?.gap!=null?(qaMatch.gap>0?"+":"")+qaMatch.gap:"--"}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace",color:C.dim}}>{a.qaScore||"--"}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace",fontSize:10,color:a.gap!=null&&Math.abs(a.gap)>15?C.amber:C.dim}}>{a.gap?(a.gap>0?"+":"")+a.gap:"--"}</td>
             <td style={{padding:"8px 10px",fontSize:10,color:C.dim,maxWidth:180,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.comments.length?a.comments[a.comments.length-1].substring(0,60):"--"}</td>
             <td style={{padding:"8px 10px"}}>{a.entries?.[0]?.url&&<a href={a.entries[a.entries.length-1].url} target="_blank" rel="noopener noreferrer"
               style={{fontSize:9,color:C.purple,textDecoration:"none"}}>{"\u2197"} Gladly</a>}</td>
@@ -1345,7 +1372,7 @@ export default function NextSkill(){
 
     {/* FOOTER */}
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
-      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.0 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
+      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.1 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
 
 
