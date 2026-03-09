@@ -9,6 +9,11 @@ const SCS=["WW","TL","RB","VT","AI","OW","SS","AP","PR","LV"];
 const SC_FULL={WW:"Warm Welcome",TL:"Thoughtful Listening",RB:"Removing Barriers",VT:"Valuing Time",AI:"Accurate Info",OW:"Ownership",SS:"Sales as Service",AP:"Apologies",PR:"Professionalism",LV:"Living Values"};
 const GOAL=72;
 
+const ICON="data:image/jpeg;base64,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";
+// Logo rendered as SVG+text
+const _LOGOTYPE_UNUSED="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";
+
+
 const DEFAULT_QA_SHEET="1tH-SwH7OAdMSU-odErm6h8TF2kxCJN1veJ9fhmCzEJU";
 const DEFAULT_ROSTER_SHEET="1oY85yRMRQCTsWxzvH43aJsmWsWxLH6PS";
 const DEFAULT_SURVEY_SHEET="1KUpnp3oFTLfw0Y9m5qsCaBklYcQYL6L7wE2lTqIZ530";
@@ -20,15 +25,6 @@ const SC_MAP={"Warm Welcome & Respect":"WW","Thoughtful Listening":"TL","Underst
   "Ownership & Follow-Through":"OW","Sales as Service":"SS","Apologies & Gratitude":"AP",
   "Professionalism & Positive Intent":"PR","Living Our Values":"LV"};
 
-// --- NUEVOS ESTILOS PREMIUM ---
-const premiumStyles = `
-  .premium-row { transition: all 0.2s ease; border-left: 2px solid transparent; }
-  .premium-row:hover { background: rgba(30, 41, 59, 0.6) !important; border-left: 2px solid #06b6d4; }
-  .coach-btn { opacity: 0; transition: all 0.2s ease; transform: translateX(10px); }
-  .premium-row:hover .coach-btn { opacity: 1; transform: translateX(0); }
-  .coach-btn:hover { background: #06b6d4 !important; color: #fff !important; }
-`;
-
 function getWeekStart(dateStr){
   const d=new Date(dateStr);
   const day=d.getUTCDay();
@@ -38,6 +34,10 @@ function getWeekStart(dateStr){
 
 function processFiles(csvText,rosterTabs){
   const csv=Papa.parse(csvText,{header:true,skipEmptyLines:true});
+
+  // rosterTabs = {leadership:csvText, ccMexico:csvText, ccJamaica:csvText, act:csvText}
+
+  // 1. Build TL map from Leadership tab
   const tlMap={};
   if(rosterTabs.leadership){
     Papa.parse(rosterTabs.leadership,{header:true,skipEmptyLines:true}).data.forEach(row=>{
@@ -52,6 +52,7 @@ function processFiles(csvText,rosterTabs){
     });
   }
 
+  // 2. Build agent -> supervisor email mapping from roster tabs
   const agentSup={};
   [rosterTabs.ccMexico,rosterTabs.ccJamaica,rosterTabs.act].forEach(tabCsv=>{
     if(!tabCsv)return;
@@ -62,9 +63,15 @@ function processFiles(csvText,rosterTabs){
     });
   });
 
-  const cfs=csv.data.filter(r=>r["Scorecard Name"]==="Customer First Scorecard"&&(r["Email"]||"").includes("contractor."));
-  if(!cfs.length) return{error:"No contractor evaluations found in CSV."};
+  // 4. Filter CSV: Customer First Scorecard + contractor emails only
+  const cfs=csv.data.filter(r=>
+    r["Scorecard Name"]==="Customer First Scorecard"&&
+    (r["Email"]||"").includes("contractor.")
+  );
 
+  if(!cfs.length) return{error:"No contractor evaluations found in CSV. Make sure the file contains 'Customer First Scorecard' rows with contractor emails."};
+
+  // 5. Group into interactions
   const interactions={};
   cfs.forEach(r=>{
     const iid=r["Interaction ID"];
@@ -86,6 +93,7 @@ function processFiles(csvText,rosterTabs){
     if(cmt&&q) interactions[iid].comments[q]=cmt;
   });
 
+  // 6. Week bucketing
   const weekSet=new Set();
   Object.values(interactions).forEach(i=>weekSet.add(getWeekStart(i.date)));
   const weeks=[...weekSet].sort();
@@ -94,13 +102,17 @@ function processFiles(csvText,rosterTabs){
     return d.toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"});
   });
 
+  // 7. Group by agent
   const agentData={};
   Object.values(interactions).forEach(int=>{
-    if(!agentData[int.email]){agentData[int.email]={name:int.agent,email:int.email,interactions:[],channels:[]};}
+    if(!agentData[int.email]){
+      agentData[int.email]={name:int.agent,email:int.email,interactions:[],channels:[]};
+    }
     agentData[int.email].interactions.push(int);
     agentData[int.email].channels.push(int.channel);
   });
 
+  // 8. Build agent objects and group by TL
   const tlGroups={};
   Object.values(agentData).forEach(ad=>{
     const w=weeks.map(wk=>{
@@ -133,6 +145,7 @@ function processFiles(csvText,rosterTabs){
     tlGroups[tlKey].agents.push({n:ad.name,w,sc,pr,nt,ch});
   });
 
+  // 9. QA analyst stats
   const qaData={};
   Object.values(interactions).forEach(int=>{
     if(!qaData[int.qa]) qaData[int.qa]={name:int.qa,scores:[],weeklyScores:{}};
@@ -167,6 +180,11 @@ function processFiles(csvText,rosterTabs){
     stats:{interactions:Object.keys(interactions).length,agents:totalAgents,tlCount:tls.filter(t=>t.name!=="Unassigned").length,weekCount:weeks.length}};
 }
 
+
+
+// =================================================================
+// SURVEY PROCESSING
+// =================================================================
 function processSurveys(csvText){
   if(!csvText)return{agents:{},total:0,avgRating:0,responseRate:0};
   const csv=Papa.parse(csvText,{header:true,skipEmptyLines:true});
@@ -198,6 +216,7 @@ function processSurveys(csvText){
   Object.values(agents).forEach(a=>{
     a.avgRating=a.ratings.length?+(a.ratings.reduce((s,v)=>s+v,0)/a.ratings.length).toFixed(1):null;
   });
+  // Build conversation ID → survey map for URL correlation
   const byConvId={};
   Object.values(agents).forEach(a=>a.entries.forEach(e=>{
     if(e.convId)byConvId[e.convId]={agent:a.name,rating:e.rating,comment:e.comment,date:e.date};
@@ -205,6 +224,8 @@ function processSurveys(csvText){
   return{agents,byConvId,total:totalSurveys,avgRating:ratingCount?+(ratingSum/ratingCount).toFixed(1):0,
     responseRate:totalSurveys?Math.round(totalResponded/totalSurveys*100):0};
 }
+
+
 
 function extractConvId(url){return (url||"").split("/conversation/")[1]||"";}
 
@@ -222,6 +243,7 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
   if(!surveyData?.byConvId||!Object.keys(surveyData.byConvId).length)
     return{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0};
 
+  // URL-based matching: QA interaction ↔ Survey response
   const pairs=[];
   const agentPairs={};
   (rawInts||[]).forEach(int=>{
@@ -235,9 +257,11 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
     }
   });
 
+  // Overall Pearson correlation
   const qScores=pairs.map(p=>p.qaScore), cScores=pairs.map(p=>p.csatRating*20);
   const pearson=pearsonCorrelation(qScores,cScores);
 
+  // Per-category impact on CSAT
   const categoryImpact=SCS.map(c=>{
     const valid=pairs.filter(p=>p.scBreakdown?.[c]);
     const xs=valid.map(p=>p.scBreakdown[c]==="Met"||p.scBreakdown[c]==="Exceed"?1:0);
@@ -245,6 +269,7 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
     return{code:c,name:SC_FULL[c],correlation:pearsonCorrelation(xs,ys),n:valid.length};
   }).filter(c=>c.correlation!=null).sort((a,b)=>Math.abs(b.correlation)-Math.abs(a.correlation));
 
+  // Agent-level aggregation
   const agentMap={};
   Object.entries(agentPairs).forEach(([name,ps])=>{
     const avgQA=+(ps.reduce((s,p)=>s+p.qaScore,0)/ps.length).toFixed(1);
@@ -253,6 +278,7 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
       alignment:avgCSAT>=4&&avgQA>=GOAL?"aligned":avgCSAT>=4&&avgQA<GOAL?"csat_leads":avgCSAT<3&&avgQA>=GOAL?"qa_leads":avgCSAT<3&&avgQA<60?"both_low":"neutral"};
   });
 
+  // Generate findings
   const findings=[];
   Object.entries(agentMap).forEach(([name,d])=>{
     if(d.csatRating>=4&&d.qaScore<GOAL)
@@ -266,6 +292,7 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
         msg:"CSAT "+d.csatRating+"\u2605 and QA "+d.qaScore+" \u2014 urgent intervention needed"});
   });
 
+  // Top insight from category impact
   if(categoryImpact.length>=2){
     const top=categoryImpact[0];
     findings.unshift({agent:"Campaign",type:"impact_insight",severity:"insight",
@@ -276,6 +303,9 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
     agentMap,pairs,pearson,categoryImpact,matched:pairs.length};
 }
 
+// =================================================================
+// COACHING ENGINE
+// =================================================================
 function getStrengths(agent,n=3){
   return SCS.map(c=>({code:c,name:SC_FULL[c],pct:agent.sc[c]||0}))
     .sort((a,b)=>b.pct-a.pct).slice(0,n);
@@ -348,6 +378,9 @@ function exportCoachingCSV(tls,wIdx,surveyData){
   link.click();URL.revokeObjectURL(url);
 }
 
+// =================================================================
+// COMPUTATION ENGINE
+// =================================================================
 function getAgentAvg(a,wIdx){return a.w[wIdx];}
 function getAgentTrend(a,wIdx){
   if(wIdx<1)return null;
@@ -428,11 +461,17 @@ function genFocusCards(level,context,wIdx){
   return cards;
 }
 
-const C={bg:"#0a0f1a",panel:"#111827",card:"#1a2236",border:"#1e293b",text:"#e2e8f0",dim:"#94a3b8",
-  muted:"#475569",cyan:"#06b6d4",blue:"#3b82f6",green:"#4ade80",red:"#ef4444",amber:"#f59e0b",
-  purple:"#a78bfa",orange:"#f97316",teal:"#14b8a6"};
-const cs={background:C.card,borderRadius:10,border:"1px solid "+C.border,padding:16};
+// =================================================================
+// COLORS & STYLING
+// =================================================================
+const C={bg:"#0a0f1a",panel:"#0d1321",card:"#111b2e",border:"#1e293b50",text:"#e2e8f0",dim:"#94a3b8",
+  muted:"#475569",cyan:"#06b6d4",blue:"#3b82f6",green:"#34d399",red:"#f87171",amber:"#fbbf24",
+  purple:"#a78bfa",orange:"#f97316",teal:"#14b8a6",glass:"rgba(17,27,46,0.7)",glow:"#06b6d415"};
+const cs={background:C.glass,borderRadius:12,border:"1px solid "+C.border,padding:16,backdropFilter:"blur(12px)"};
 
+// =================================================================
+// GOOGLE SHEETS FETCH
+// =================================================================
 function sheetCsvUrl(sheetId,tabName){
   const base="https://docs.google.com/spreadsheets/d/"+sheetId+"/gviz/tq?tqx=out:csv";
   return tabName?base+"&sheet="+encodeURIComponent(tabName):base;
@@ -461,40 +500,10 @@ async function fetchFromSheets(qaSheetId,rosterSheetId,surveySheetId){
   return{...result,surveyData};
 }
 
-// --- NUEVOS MICROCOMPONENTES ESTÉTICOS ---
-function Sparkline({ data, color }) {
-  if (!data || data.length < 2) return <div style={{width: 50, height: 25, color: C.dim, fontSize:10}}>--</div>;
-  const chartData = data.map(v => ({ val: v }));
-  return (
-    <div style={{width: 50, height: 25}}>
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData}>
-          <defs>
-            <linearGradient id={`grad-${color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={color} stopOpacity={0.4}/>
-              <stop offset="95%" stopColor={color} stopOpacity={0}/>
-            </linearGradient>
-          </defs>
-          <Area type="monotone" dataKey="val" stroke={color} fill={`url(#grad-${color.replace('#','')})`} strokeWidth={1.5} isAnimationActive={false} />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
 
-function PremiumBadge({ text, color }) {
-  return (
-    <span style={{
-      fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: "6px",
-      background: color + "1A", color: color, border: "1px solid " + color + "44",
-      letterSpacing: "0.5px"
-    }}>
-      {text}
-    </span>
-  );
-}
-// ------------------------------------------
-
+// =================================================================
+// SHARED UI COMPONENTS
+// =================================================================
 function Tp({active,payload,label}){
   if(!active||!payload)return null;
   return <div style={{background:C.panel,border:"1px solid "+C.border,borderRadius:8,padding:"8px 12px",fontSize:11}}>
@@ -521,23 +530,37 @@ function EmptyState({message}){
     <div style={{fontSize:12,color:C.dim}}>{message}</div>
   </div>;
 }
-function KpiCard({value,label,color,delta,icon,onClick}){
-  return <div onClick={onClick} style={{...cs,flex:1,minWidth:140,cursor:onClick?"pointer":"default",transition:"border-color .2s"}}
-    onMouseEnter={e=>{if(onClick)e.currentTarget.style.borderColor=color;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;}}>
-    {icon&&<div style={{fontSize:14,marginBottom:4,opacity:.5}}>{icon}</div>}
-    <div style={{fontSize:22,fontWeight:800,color,fontFamily:"monospace"}}>{value}{delta!=null&&<WoWBadge delta={delta}/>}</div>
-    <div style={{fontSize:10,color:C.dim,marginTop:2}}>{label}</div>
+function KpiCard({value,label,color,delta,icon,onClick,sub}){
+  return <div onClick={onClick} style={{...cs,flex:1,minWidth:150,cursor:onClick?"pointer":"default",
+    transition:"all .2s",borderBottom:"2px solid "+color+"33",position:"relative",overflow:"hidden"}}
+    onMouseEnter={e=>{e.currentTarget.style.borderBottomColor=color;e.currentTarget.style.background=color+"08";}}
+    onMouseLeave={e=>{e.currentTarget.style.borderBottomColor=color+"33";e.currentTarget.style.background=C.glass;}}>
+    <div style={{position:"absolute",top:-20,right:-20,width:60,height:60,borderRadius:"50%",background:color+"08"}}/>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+      <div>
+        <div style={{fontSize:10,color:C.dim,marginBottom:6,fontWeight:500}}>{label}</div>
+        <div style={{fontSize:26,fontWeight:800,color,fontFamily:"'Geist Mono',monospace",letterSpacing:"-1px",lineHeight:1}}>{value}</div>
+      </div>
+      {icon&&<div style={{fontSize:18,opacity:.3}}>{icon}</div>}
+    </div>
+    {delta!=null&&<div style={{marginTop:6}}><WoWBadge delta={delta}/></div>}
+    {sub&&<div style={{fontSize:9,color:C.dim,marginTop:4}}>{sub}</div>}
   </div>;
 }
 function FocusCard({card,onClick}){
-  return <div onClick={onClick} style={{...cs,flex:1,minWidth:200,borderLeft:"3px solid "+card.color,cursor:onClick?"pointer":"default",transition:"all .15s"}}
-    onMouseEnter={e=>{if(onClick)e.currentTarget.style.borderColor=card.color;}} onMouseLeave={e=>{e.currentTarget.style.borderColor=C.border;}}>
-    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
-      <span style={{fontSize:14}}>{card.icon}</span>
+  return <div onClick={onClick} style={{...cs,flex:1,minWidth:200,cursor:onClick?"pointer":"default",
+    transition:"all .2s",borderLeft:"3px solid "+card.color,position:"relative",overflow:"hidden"}}
+    onMouseEnter={e=>{e.currentTarget.style.background=card.color+"0a";e.currentTarget.style.transform="translateY(-1px)";}}
+    onMouseLeave={e=>{e.currentTarget.style.background=C.glass;e.currentTarget.style.transform="none";}}>
+    <div style={{position:"absolute",top:-15,right:-15,width:50,height:50,borderRadius:"50%",background:card.color+"08"}}/>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+      <div style={{width:28,height:28,borderRadius:7,background:card.color+"15",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <span style={{fontSize:13}}>{card.icon}</span>
+      </div>
       <span style={{fontSize:10,fontWeight:600,color:C.dim,textTransform:"uppercase",letterSpacing:"0.5px"}}>{card.title}</span>
     </div>
-    <div style={{fontSize:16,fontWeight:700,color:card.color,fontFamily:"monospace"}}>{card.value}</div>
-    <div style={{fontSize:10,color:C.dim,marginTop:4}}>{card.sub}</div>
+    <div style={{fontSize:18,fontWeight:800,color:card.color,fontFamily:"'Geist Mono',monospace",letterSpacing:"-0.5px"}}>{card.value}</div>
+    <div style={{fontSize:10,color:C.dim,marginTop:4,lineHeight:1.4}}>{card.sub}</div>
   </div>;
 }
 
@@ -563,6 +586,18 @@ function useSort(defaultKey,defaultDir="desc"){
   return{sk,sd,toggle,sortFn};
 }
 
+
+function DonutChart({value,total,color,size=64}){
+  const pct=total?value/total:0;
+  const r=(size-6)/2;
+  const c=2*Math.PI*r;
+  return <svg width={size} height={size} style={{transform:"rotate(-90deg)"}}>
+    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.border} strokeWidth={3}/>
+    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={3}
+      strokeDasharray={c} strokeDashoffset={c*(1-pct)} strokeLinecap="round" style={{transition:"stroke-dashoffset .8s ease"}}/>
+  </svg>;
+}
+
 function RiskBadge({level}){
   const colors={HIGH:C.red,MEDIUM:C.amber,LOW:C.green};
   return <span style={{fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:10,
@@ -577,6 +612,15 @@ function TabButton({label,active,onClick,badge}){
       background:C.red,color:"#fff",borderRadius:10,padding:"1px 5px",minWidth:14,textAlign:"center"}}>{badge}</span>}
   </button>;
 }
+
+// =================================================================
+// INTERACTION MODAL — Redesigned for clarity & coaching
+// =================================================================
+const SC_GROUPS=[
+  {label:"Customer Experience",codes:["WW","TL","VT","AP"]},
+  {label:"Problem Resolution",codes:["RB","OW","AI"]},
+  {label:"Professionalism & Values",codes:["PR","LV","SS"]}
+];
 
 function ScoreGauge({score,size=80}){
   const pct=Math.min(100,Math.max(0,score))/100;
@@ -599,12 +643,6 @@ function ScoreGauge({score,size=80}){
   </div>;
 }
 
-const SC_GROUPS=[
-  {label:"Customer Experience",codes:["WW","TL","VT","AP"]},
-  {label:"Problem Resolution",codes:["RB","OW","AI"]},
-  {label:"Professionalism & Values",codes:["PR","LV","SS"]}
-];
-
 function InteractionModal({interactions,onClose}){
   const[idx,setIdx]=useState(0);
   const[expandedFb,setExpandedFb]=useState({});
@@ -612,6 +650,7 @@ function InteractionModal({interactions,onClose}){
   const comments=int.comments||{};
   const commentKeys=Object.keys(comments);
 
+  // Quick issue summary: Not Met or Partial items
   const issues=[];
   SCS.forEach(c=>{
     const val=int.sc?.[c];
@@ -627,6 +666,8 @@ function InteractionModal({interactions,onClose}){
     onClick={onClose}>
     <div onClick={e=>e.stopPropagation()} style={{background:C.panel,borderRadius:16,border:"1px solid "+C.border,
       maxWidth:680,width:"100%",maxHeight:"90vh",overflow:"auto",padding:0}}>
+
+      {/* HEADER: agent context + action buttons */}
       <div style={{padding:"14px 24px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
         <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
           <span style={{fontSize:14,fontWeight:700}}>{int.agent}</span>
@@ -643,7 +684,10 @@ function InteractionModal({interactions,onClose}){
           <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer",marginLeft:4}}>{"✕"}</button>
         </div>
       </div>
+
       <div style={{padding:"20px 24px"}}>
+
+        {/* Multi-interaction selector */}
         {interactions.length>1&&<div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
           {interactions.map((it,i)=><button key={i} onClick={()=>{setIdx(i);setExpandedFb({});}}
             style={{fontSize:10,padding:"4px 10px",borderRadius:4,border:"1px solid "+(i===idx?C.cyan:C.border),
@@ -651,6 +695,8 @@ function InteractionModal({interactions,onClose}){
             {new Date(it.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})} {"—"} {it.score}
           </button>)}
         </div>}
+
+        {/* SCORE GAUGE + DISTANCE */}
         <div style={{display:"flex",alignItems:"center",gap:20,marginBottom:20}}>
           <ScoreGauge score={int.score} size={90}/>
           <div>
@@ -665,6 +711,8 @@ function InteractionModal({interactions,onClose}){
               </div>}
           </div>
         </div>
+
+        {/* QUICK ISSUE SUMMARY */}
         {issues.length>0&&<div style={{marginBottom:16,padding:"10px 14px",borderRadius:8,background:C.red+"08",border:"1px solid "+C.red+"20"}}>
           <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>{"⚠"} Key Issues ({issues.length})</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
@@ -674,6 +722,8 @@ function InteractionModal({interactions,onClose}){
             </span>)}
           </div>
         </div>}
+
+        {/* SERVICE COMMITMENTS — Grouped */}
         <div style={{marginBottom:16}}>
           <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.5px"}}>Service Commitments</div>
           {SC_GROUPS.map((g,gi)=><div key={gi} style={{marginBottom:10}}>
@@ -699,6 +749,8 @@ function InteractionModal({interactions,onClose}){
               </div>)}
           </div>
         </div>
+
+        {/* QA FEEDBACK — Collapsible */}
         {commentKeys.length>0?<div style={{marginBottom:8}}>
           <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>QA Feedback ({commentKeys.length})</div>
           {commentKeys.map((q,i)=>{
@@ -717,11 +769,16 @@ function InteractionModal({interactions,onClose}){
         <div style={{padding:"12px 14px",borderRadius:6,background:C.bg,marginBottom:8}}>
           <span style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>No written feedback for this evaluation</span>
         </div>}
+
       </div>
     </div>
   </div>;
 }
 
+
+// =================================================================
+// AGENT PROFILE PANEL
+// =================================================================
 function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction}){
   if(!agent)return null;
   const risk=getRiskLevel(agent,wIdx);
@@ -730,6 +787,8 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
   const agentInts=(interactions||[]).filter(i=>i.agent===agent.n);
   const survey=surveyData?.agents?.[agent.n];
   const trendData=agent.w.map((v,i)=>v!=null?{wk:WEEKS[i],score:v}:null).filter(Boolean);
+
+  // Filter survey entries by selected week
   const selectedWeekISO=weekISO?.[wIdx]||"";
   const weekEntries=(survey?.entries||[]).filter(e=>e.date&&getWeekStart(e.date)===selectedWeekISO);
   const weekRatings=weekEntries.filter(e=>e.rating!=null).map(e=>e.rating);
@@ -761,7 +820,7 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
       <ResponsiveContainer width="100%" height={100}>
         <AreaChart data={trendData}>
           <defs><linearGradient id="agGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={C.cyan} stopOpacity={0.3}/><stop offset="95%" stopColor={C.cyan} stopOpacity={0}/>
+            <stop offset="0%" stopColor={C.cyan} stopOpacity={0.15}/><stop offset="100%" stopColor={C.cyan} stopOpacity={0.01}/>
           </linearGradient></defs>
           <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/>
           <XAxis dataKey="wk" tick={{fontSize:9,fill:C.muted}} axisLine={false} tickLine={false}/>
@@ -853,7 +912,9 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
   </div>;
 }
 
-// --- CAMPAIGN VIEW MODIFICADA CON CUIDADO ---
+// =================================================================
+// DASHBOARD VIEWS
+// =================================================================
 function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csatFindings,site,filteredTLs}){
   const tlSort=useSort("avg");
   const allAgents=filteredTLs.flatMap(t=>t.agents);
@@ -880,14 +941,25 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
     <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
       {cards.map((c,i)=><FocusCard key={i} card={c} onClick={c.action?()=>setCatFilter(c.action):c.onClick}/>)}
     </div>
-    {csatFindings&&csatFindings.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.purple}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.purple,marginBottom:8}}>{"??"} CSAT-QA Insights</div>
-      {csatFindings.slice(0,5).map((f,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<Math.min(csatFindings.length,5)-1?"1px solid "+C.border+"22":undefined,
-        display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div><span style={{fontSize:11,fontWeight:600,cursor:"pointer"}}>{f.agent}</span>
-          <span style={{fontSize:10,color:C.dim,marginLeft:8}}>{f.tl}</span></div>
-        <span style={{fontSize:10,color:f.severity==="critical"?C.red:f.severity==="warning"?C.amber:C.teal}}>{f.msg}</span>
-      </div>)}
+    {csatFindings&&csatFindings.length>0&&<div style={{...cs,marginBottom:12}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:10}}>CSAT-QA Insights</div>
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {csatFindings.slice(0,5).map((f,i)=>{
+          const sev=f.severity;
+          const clr=sev==="critical"?C.red:sev==="warning"?C.amber:C.teal;
+          const ic=sev==="critical"?"\u26d4":sev==="warning"?"\u26a0":"\u2139";
+          return <div key={i} style={{padding:"10px 14px",borderRadius:8,background:clr+"06",border:"1px solid "+clr+"20",
+            borderLeft:"3px solid "+clr,display:"flex",gap:10,alignItems:"flex-start",transition:"all .15s",cursor:"default"}}
+            onMouseEnter={e=>{e.currentTarget.style.background=clr+"12";}} onMouseLeave={e=>{e.currentTarget.style.background=clr+"06";}}>
+            <div style={{width:28,height:28,borderRadius:6,background:clr+"15",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <span style={{fontSize:13}}>{ic}</span>
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>{f.agent}</div>
+              <div style={{fontSize:10,color:clr,lineHeight:1.4}}>{f.msg}</div>
+            </div>
+          </div>;})}
+      </div>
     </div>}
     <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12,marginBottom:16}}>
       <div style={{...cs}}>
@@ -908,56 +980,45 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
         </ResponsiveContainer>
       </div>
       <div style={{...cs}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Filtros Rápidos</div>
-        {/* Aquí reemplazamos la lista estática por los PILLS para que sea una consola rápida */}
-        <div style={{display: "flex", flexWrap: "wrap", gap: "8px"}}>
-          {catData.sort((a,b)=>b.count-a.count).map(d=><button key={d.cat} onClick={()=>setCatFilter(catFilter===d.cat?null:d.cat)}
-            style={{display:"flex",alignItems:"center",gap:6,padding:"6px 12px",borderRadius:"16px",cursor:"pointer",
-              background:catFilter===d.cat?d.color+"22":"transparent",border:"1px solid "+(catFilter===d.cat?d.color:C.border),transition:"all .15s"}}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:d.color}}/><span style={{fontSize:10,color:catFilter===d.cat?d.color:C.dim}}>{d.cat}</span>
-            <span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:d.color}}>{d.count}</span></button>)}
+        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Agent Categories</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center",marginBottom:8}}>
+          {catData.sort((a,b)=>b.count-a.count).map(d=><div key={d.cat} onClick={()=>setCatFilter(catFilter===d.cat?null:d.cat)}
+            style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"8px 6px",borderRadius:8,cursor:"pointer",minWidth:70,
+              background:catFilter===d.cat?d.color+"12":"transparent",border:catFilter===d.cat?"1px solid "+d.color+"33":"1px solid transparent",transition:"all .2s"}}
+            onMouseEnter={e=>e.currentTarget.style.background=d.color+"08"} onMouseLeave={e=>{if(catFilter!==d.cat)e.currentTarget.style.background="transparent";}}>
+            <div style={{position:"relative"}}>
+              <DonutChart value={d.count} total={scored.length} color={d.color} size={52}/>
+              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:13,fontWeight:800,fontFamily:"monospace",color:d.color}}>{d.count}</span>
+              </div>
+            </div>
+            <span style={{fontSize:9,color:catFilter===d.cat?d.color:C.dim,fontWeight:catFilter===d.cat?700:500,textAlign:"center"}}>{d.cat}</span>
+          </div>)}
         </div>
-        {catFilter&&<button onClick={()=>setCatFilter(null)} style={{fontSize:9,color:C.dim,background:"none",border:"none",cursor:"pointer",marginTop:12}}>Clear filter</button>}
+        {catFilter&&<div style={{textAlign:"center"}}><button onClick={()=>setCatFilter(null)} style={{fontSize:9,color:C.cyan,background:C.cyan+"10",border:"1px solid "+C.cyan+"33",borderRadius:4,padding:"3px 12px",cursor:"pointer"}}>Clear filter</button></div>}
       </div>
     </div>
 
+    {/* When category is filtered, show agents directly */}
     {catFilter&&<div style={{...cs}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
         <div style={{fontSize:11,fontWeight:600,color:C.dim}}>{catFilter} Agents</div>
         <button onClick={()=>setCatFilter(null)} style={{fontSize:10,color:C.cyan,background:"none",border:"1px solid "+C.cyan+"44",borderRadius:4,padding:"3px 10px",cursor:"pointer"}}>Show All</button>
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <SortHeader columns={[["name","Agent"],["tl","Team Lead"],["score","Score",60],["trend","Trend",80],["risk","Status",80],["action","",70]]}
+        <SortHeader columns={[["name","Agent"],["tl","Team Lead"],["site","Site",50],["score","Score",60],["trend","Trend",60],["risk","Risk",60]]}
             sortKey={tlSort.sk} sortDir={tlSort.sd} onSort={tlSort.toggle}/>
         <tbody>{filteredTLs.flatMap(t=>t.agents.filter(a=>classify(a,wIdx).cat===catFilter).map(a=>({a,t,name:a.n,tl:t.name,site:t.site,score:a.w[wIdx]||0,trend:getAgentTrend(a,wIdx)||0,risk:getRiskLevel(a,wIdx).level})))
           .sort((x,y)=>tlSort.sortFn(x[tlSort.sk],y[tlSort.sk])).map(({a,t},i)=>{
-          const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx);
-          const recentScores = a.w.slice(Math.max(0, wIdx - 4), wIdx + 1).filter(v=>v!=null);
-          return <tr key={i} className="premium-row" onClick={()=>onSelectAgent(a,t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}>
+          const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx),risk=getRiskLevel(a,wIdx);
+          return <tr key={i} onClick={()=>onSelectAgent(a,t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <td style={{padding:"8px",fontWeight:600}}>{a.n}</td>
             <td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.name}</td>
+            <td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.site}</td>
             <td style={{padding:"8px",fontWeight:700,fontFamily:"monospace",color:cat.color}}>{a.w[wIdx]||"--"}</td>
-            
-            {/* INYECTAMOS SPARKLINE AQUÍ */}
-            <td style={{padding:"4px 8px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <Sparkline data={recentScores} color={cat.color} />
-                {tr!=null&&<span style={{fontSize:9,color:tr>=0?C.green:C.red}}>{tr>0?"+":""}{tr}</span>}
-              </div>
-            </td>
-            
-            {/* INYECTAMOS BADGE PREMIUM AQUÍ */}
-            <td style={{padding:"8px"}}>
-               <PremiumBadge text={cat.cat} color={cat.color} />
-            </td>
-
-            {/* BOTÓN COACHING (Misión de soporte) */}
-            <td style={{padding:"8px", textAlign:"right"}}>
-              <button className="coach-btn" onClick={(e)=>{ e.stopPropagation(); }}
-                style={{fontSize: 9, fontWeight: 600, padding: "4px 8px", borderRadius: "4px", background: C.cyan + "15", color: C.cyan, border: "1px solid " + C.cyan + "33", cursor: "pointer"}}>
-                Coaching
-              </button>
-            </td>
+            <td style={{padding:"8px"}}>{tr!=null&&<WoWBadge delta={tr}/>}</td>
+            <td style={{padding:"8px"}}><RiskBadge level={risk.level}/></td>
           </tr>;})}</tbody>
       </table>
     </div>}
@@ -971,11 +1032,15 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
           const ta=t.agents.filter(a=>a.w[wIdx]!=null);
           const tavg=ta.length?(ta.reduce((s,a)=>s+a.w[wIdx],0)/ta.length).toFixed(1):"--";
           const tw=wowDelta(t.agents,wIdx);
-          return <tr key={i} className="premium-row" onClick={()=>onSelectTL(t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}>
+          return <tr key={i} onClick={()=>onSelectTL(t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <td style={{padding:"8px 10px",fontWeight:600}}>{t.name}</td>
             <td style={{padding:"8px 10px",color:C.dim}}>{t.site}</td>
             <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{t.agents.length}</td>
-            <td style={{padding:"8px 10px",fontWeight:700,fontFamily:"monospace",color:parseFloat(tavg)>=GOAL?C.green:C.amber}}>{tavg}</td>
+            <td style={{padding:"8px 10px"}}><span style={{fontWeight:700,fontFamily:"'Geist Mono',monospace",fontSize:12,
+              padding:"3px 8px",borderRadius:5,
+              background:parseFloat(tavg)>=GOAL?C.green+"15":parseFloat(tavg)>=60?C.amber+"15":C.red+"15",
+              color:parseFloat(tavg)>=GOAL?C.green:parseFloat(tavg)>=60?C.amber:C.red}}>{tavg}</span></td>
             <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{ta.filter(a=>a.w[wIdx]>=GOAL).length}/{ta.length}</td>
             <td style={{padding:"8px 10px"}}>{tw!=null&&<WoWBadge delta={tw}/>}</td>
           </tr>;})}</tbody>
@@ -1003,39 +1068,22 @@ function TLView({tl,wIdx,onSelectAgent}){
     <div style={{...cs}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Rankings</div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <SortHeader columns={[["name","Agent"],["score","Score",60],["cat","Status",100],["trend","Trend",80],["w72","\u2192 72",50],["risk","Risk",60],["action","",60]]}
+        <SortHeader columns={[["name","Agent"],["score","Score",60],["cat","Category",80],["trend","Trend",60],["w72","\u2192 72",50],["ch","Channel",50],["risk","Risk",60]]}
             sortKey={agSort.sk} sortDir={agSort.sd} onSort={agSort.toggle}/>
         <tbody>{[...tl.agents].map(a=>{const c=classify(a,wIdx);return{a,name:a.n,score:a.w[wIdx]||0,cat:c.cat,
           trend:getAgentTrend(a,wIdx)||0,w72:weeksTo72(a,wIdx)||999,ch:a.ch,risk:getRiskLevel(a,wIdx).level};})
           .sort((x,y)=>agSort.sortFn(x[agSort.sk],y[agSort.sk]))
           .map(({a},i)=>{
           const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx),w72=weeksTo72(a,wIdx),risk=getRiskLevel(a,wIdx);
-          const recentScores = a.w.slice(Math.max(0, wIdx - 4), wIdx + 1).filter(v=>v!=null);
-          return <tr key={i} className="premium-row" onClick={()=>onSelectAgent(a)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}>
+          return <tr key={i} onClick={()=>onSelectAgent(a)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <td style={{padding:"8px",fontWeight:600}}>{a.n}</td>
             <td style={{padding:"8px",fontWeight:700,fontFamily:"monospace",color:cat.color}}>{a.w[wIdx]||"--"}</td>
-            
-            {/* SPARKLINE */}
-            <td style={{padding:"4px 8px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                <Sparkline data={recentScores} color={cat.color} />
-              </div>
-            </td>
-            
-            {/* TREND BADGE */}
-            <td style={{padding:"8px"}}>
-              {tr!=null&&<span style={{fontSize:9,color:tr>=0?C.green:C.red}}>{tr>0?"+":""}{tr}</span>}
-            </td>
+            <td style={{padding:"8px"}}><span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:cat.color+"18",color:cat.color}}>{cat.cat}</span></td>
+            <td style={{padding:"8px"}}>{tr!=null&&<WoWBadge delta={tr}/>}</td>
             <td style={{padding:"8px",fontFamily:"monospace",fontSize:10,color:C.dim}}>{w72?"~"+w72+"w":"--"}</td>
-            <td style={{padding:"8px"}}><PremiumBadge text={cat.cat} color={cat.color} /></td>
-            
-            {/* COACHING BUTTON */}
-            <td style={{padding:"8px", textAlign:"right"}}>
-              <button className="coach-btn" onClick={(e)=>{ e.stopPropagation(); }}
-                style={{fontSize: 9, fontWeight: 600, padding: "4px 8px", borderRadius: "4px", background: C.cyan + "15", color: C.cyan, border: "1px solid " + C.cyan + "33", cursor: "pointer"}}>
-                Coaching
-              </button>
-            </td>
+            <td style={{padding:"8px",fontSize:10,color:C.dim}}>{a.ch}</td>
+            <td style={{padding:"8px"}}><RiskBadge level={risk.level}/></td>
           </tr>;})}</tbody>
       </table>
     </div>
@@ -1085,6 +1133,9 @@ function AgentView({agent,tl,wIdx}){
   </div>;
 }
 
+// =================================================================
+// TABS: COACHING, QA ANALYTICS, SURVEYS
+// =================================================================
 function CoachingTab({alerts,wIdx,onSelectAgent,tls}){
   const high=alerts.filter(a=>a.severity==="high"),med=alerts.filter(a=>a.severity==="medium");
   return <div>
@@ -1180,6 +1231,7 @@ function SurveyTab({surveyData}){
   </div>;
 }
 
+
 function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
   const[csatFilter,setCsatFilter]=useState("all");
   const intelSort=useSort("avgRating","asc");
@@ -1189,6 +1241,7 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
     csatFilter==="high"?agents.filter(a=>a.avgRating>=4):agents;
 
   return <div>
+    {/* KPIs */}
     <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
       <KpiCard value={csatData.matched} label="Matched Interactions" color={C.teal} icon={"\ud83d\udd17"}/>
       <KpiCard value={csatData.pearson!=null?csatData.pearson:"--"} label="QA-CSAT Correlation" color={csatData.pearson>0.3?C.green:C.amber} icon={"\ud83d\udcca"}/>
@@ -1197,6 +1250,7 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
       <KpiCard value={(surveyData?.responseRate||0)+"%"} label="Response Rate" color={C.teal}/>
     </div>
 
+    {/* CSAT Impact Analysis */}
     {csatData.categoryImpact.length>0&&<div style={{...cs,marginBottom:12}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>QA Impact on CSAT — Which behaviors drive customer satisfaction?</div>
       {csatData.categoryImpact.map((c,i)=>{
@@ -1215,6 +1269,7 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
       </div>}
     </div>}
 
+    {/* Findings */}
     {csatData.findings.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.purple}}>
       <div style={{fontSize:11,fontWeight:600,color:C.purple,marginBottom:8}}>{"\ud83d\udcca"} QA-CSAT Insights ({csatData.matched} matched interactions)</div>
       {csatData.findings.slice(0,8).map((f,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<Math.min(csatData.findings.length,8)-1?"1px solid "+C.border+"22":undefined,
@@ -1225,6 +1280,7 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
       </div>)}
     </div>}
 
+    {/* CSAT Filter */}
     <div style={{display:"flex",gap:8,marginBottom:12}}>
       {[["all","All"],["low","CSAT \u2264 3"],["high","CSAT \u2265 4"]].map(([val,label])=>
         <button key={val} onClick={()=>setCsatFilter(val)}
@@ -1232,6 +1288,7 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
             background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
     </div>
 
+    {/* Agent Survey Table */}
     <div style={{...cs}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
@@ -1256,6 +1313,9 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
   </div>;
 }
 
+// =================================================================
+// LOADING & SETUP SCREENS
+// =================================================================
 function LoadingScreen({error,onSetup}){
   return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",
     display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
@@ -1319,6 +1379,9 @@ function SetupScreen({onDataReady,savedConfig}){
   </div>;
 }
 
+// =================================================================
+// MAIN APPLICATION
+// =================================================================
 export default function NextSkill(){
   const[data,setData]=useState(null);
   const[config,setConfig]=useState(()=>{
@@ -1369,6 +1432,8 @@ export default function NextSkill(){
       if(!r.error){D=r;WEEKS=r.weeks;LATEST_WIDX=WEEKS.length-1;setData(r);setLastUpdated(new Date());}}catch(e){}},REFRESH_INTERVAL);
     return()=>clearInterval(intervalRef.current);},[config]);
 
+  
+  // Browser back button navigation
   React.useEffect(()=>{
     const onPop=()=>{
       const s=window.history.state||{};
@@ -1388,9 +1453,9 @@ export default function NextSkill(){
 
   const sel={fontSize:11,background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"6px 10px",fontFamily:"monospace",cursor:"pointer",outline:"none"};
 
-  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif"}}>
-    <style>{premiumStyles}</style>
-    <div style={{background:C.panel,borderBottom:"1px solid "+C.border,padding:"12px 28px"}}>
+  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Inter',-apple-system,'Segoe UI',system-ui,sans-serif"}}>
+    {/* HEADER */}
+    <div style={{background:C.panel,borderBottom:"1px solid "+C.border,padding:"12px 28px",backdropFilter:"blur(12px)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:16}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg><span style={{fontSize:16,fontWeight:800,letterSpacing:"-0.5px",color:C.text}}>Next<span style={{color:C.cyan}}>Skill</span></span></div>
@@ -1436,6 +1501,7 @@ export default function NextSkill(){
       </div>
     </div>
 
+    {/* BREADCRUMBS + EXPORT */}
     {tab==="dashboard"&&<div style={{padding:"12px 28px 0",display:"flex",alignItems:"center",gap:4}}>
       {[{label:"Campaign",onClick:()=>{setSelTL(null);setSelAgent(null);setShowProfile(false);setCatFilter(null);navPush({tab:"dashboard"});}},
         ...(selTL?[{label:selTL.name,onClick:()=>{setSelAgent(null);setShowProfile(false);}}]:[]),
@@ -1454,6 +1520,7 @@ export default function NextSkill(){
       </div>
     </div>}
 
+    {/* CONTENT */}
     <div style={{display:"flex",gap:0}}>
     <div style={{flex:1,padding:"16px 28px 40px",minWidth:0}}>
       {tab==="dashboard"&&(selAgent?<AgentView agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx} csatData={csatData}/>:
@@ -1464,15 +1531,20 @@ export default function NextSkill(){
       {tab==="intel"&&<IntelligenceTab csatData={csatData} surveyData={D.surveyData} onSelectAgent={onSelectAgent} tls={D.tls}/>}
     </div>
 
+        {/* AGENT PROFILE SIDE PANEL */}
     {showProfile&&selAgent&&<AgentProfilePanel agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx}
       interactions={D.rawInts} surveyData={D.surveyData} csatData={csatData} weekISO={D.weekISO}
       onClose={()=>{setShowProfile(false);window.history.back();}} onViewInteraction={ints=>setModalInts(ints)}/>}
     </div>
 
+    {/* FOOTER */}
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
-      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.1 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
+      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.2 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
 
+
+
+    {/* INTERACTION MODAL */}
     {modalInts&&<InteractionModal interactions={modalInts} onClose={()=>setModalInts(null)}/>}
   </div>;
 }
