@@ -588,75 +588,167 @@ function TabButton({label,active,onClick,badge}){
 }
 
 // =================================================================
-// INTERACTION MODAL
+// INTERACTION MODAL — Redesigned for clarity & coaching
 // =================================================================
-function InteractionModal({interactions,onClose}){
-  const[idx,setIdx]=useState(0);
-  const int=interactions[idx];
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}
-    onClick={onClose}>
-    <div onClick={e=>e.stopPropagation()} style={{background:C.panel,borderRadius:16,border:"1px solid "+C.border,
-      maxWidth:600,width:"100%",maxHeight:"85vh",overflow:"auto",padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <h3 style={{fontSize:16,fontWeight:700,margin:0}}>Interaction Detail</h3>
-        <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:18,cursor:"pointer"}}>{"\u2715"}</button>
-      </div>
-      {interactions.length>1&&<div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap"}}>
-        {interactions.map((it,i)=><button key={i} onClick={()=>setIdx(i)}
-          style={{fontSize:10,padding:"4px 10px",borderRadius:4,border:"1px solid "+(i===idx?C.cyan:C.border),
-            background:i===idx?C.cyan+"15":C.card,color:i===idx?C.cyan:C.dim,cursor:"pointer"}}>
-          {new Date(it.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})} {"\u2014"} {it.score}
-        </button>)}
-      </div>}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-        <div style={{...cs}}><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",marginBottom:4}}>Agent</div><div style={{fontSize:13,fontWeight:600}}>{int.agent}</div></div>
-        <div style={{...cs}}><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",marginBottom:4}}>QA Reviewer</div><div style={{fontSize:13,fontWeight:600}}>{int.qa}</div></div>
-        <div style={{...cs}}><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",marginBottom:4}}>Score</div><div style={{fontSize:20,fontWeight:800,fontFamily:"monospace",color:int.score>=GOAL?C.green:int.score>=60?C.amber:C.red}}>{int.score}</div></div>
-        <div style={{...cs}}><div style={{fontSize:9,color:C.dim,textTransform:"uppercase",marginBottom:4}}>Details</div><div style={{fontSize:11}}>{(int.channel||"").toUpperCase()} {"\u00b7"} {new Date(int.date).toLocaleDateString()}</div></div>
-      </div>
-      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>Service Commitments</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-        {SCS.map(c=>{const val=int.sc?.[c];const met=val==="Met"||val==="Exceed";const partial=val==="Met Some";
-          return <div key={c} style={{padding:"8px 12px",borderRadius:6,fontSize:11,
-            background:met?C.green+"10":partial?C.amber+"10":C.red+"10",
-            border:"1px solid "+(met?C.green+"30":partial?C.amber+"30":C.red+"30"),
-            display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span>{SC_FULL[c]}</span>
-            <span style={{fontWeight:700,fontSize:10,color:met?C.green:partial?C.amber:C.red}}>{met?"Met":partial?"Met Some":"Did Not Meet"}</span>
-          </div>;})}
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8}}>
-        {[["Follows Procedures",int.proc],["Notes in Gladly",int.notes]].map(([lbl,val])=>
-          <div key={lbl} style={{padding:"8px 12px",borderRadius:6,fontSize:11,
-            background:val?C.green+"10":C.red+"10",border:"1px solid "+(val?C.green+"30":C.red+"30"),
-            display:"flex",justifyContent:"space-between"}}>
-            <span>{lbl}</span><span style={{fontWeight:700,color:val?C.green:C.red}}>{val?"\u2713":"\u2717"}</span>
-          </div>)}
-      </div>
-      
-      {Object.keys(int.comments||{}).length>0&&<div style={{marginTop:12}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>QA Feedback</div>
-        {Object.entries(int.comments).map(([q,c],i)=><div key={i} style={{padding:"8px 12px",borderRadius:6,background:C.bg,marginBottom:4}}>
-          <div style={{fontSize:9,color:C.cyan,fontWeight:600,marginBottom:2}}>{q}</div>
-          <div style={{fontSize:11,color:C.text,fontStyle:"italic",lineHeight:1.5}}>{"“"}{c}{"”"}</div>
-        </div>)}
-      </div>}
-      {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId}
-        target="_blank" rel="noopener noreferrer"
-        style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:12,padding:"8px 16px",borderRadius:6,
-          background:C.cyan+"15",border:"1px solid "+C.cyan+"44",color:C.cyan,fontSize:11,fontWeight:600,
-          textDecoration:"none",cursor:"pointer"}}>
-        {"\u2197"} View in Stella
-      </a>}
-      {int.url&&<a href={int.url} target="_blank" rel="noopener noreferrer"
-        style={{display:"inline-flex",alignItems:"center",gap:6,marginTop:8,marginLeft:8,padding:"8px 16px",borderRadius:6,
-          background:C.purple+"15",border:"1px solid "+C.purple+"44",color:C.purple,fontSize:11,fontWeight:600,
-          textDecoration:"none",cursor:"pointer"}}>
-        {"\u2197"} View in Gladly
-      </a>}
+const SC_GROUPS=[
+  {label:"Customer Experience",codes:["WW","TL","VT","AP"]},
+  {label:"Problem Resolution",codes:["RB","OW","AI"]},
+  {label:"Professionalism & Values",codes:["PR","LV","SS"]}
+];
+
+function ScoreGauge({score,size=80}){
+  const pct=Math.min(100,Math.max(0,score))/100;
+  const r=(size-8)/2;
+  const circumference=2*Math.PI*r;
+  const scoreOffset=circumference*(1-pct);
+  const clr=score>=GOAL?C.green:score>=60?C.amber:C.red;
+  return <div style={{position:"relative",width:size,height:size}}>
+    <svg width={size} height={size} style={{transform:"rotate(-90deg)"}}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.border} strokeWidth={4}/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={clr} strokeWidth={4}
+        strokeDasharray={circumference} strokeDashoffset={scoreOffset} strokeLinecap="round" style={{transition:"stroke-dashoffset .6s ease"}}/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.green+"44"} strokeWidth={1}
+        strokeDasharray={`${circumference*(GOAL/100)} ${circumference*(1-GOAL/100)}`}/>
+    </svg>
+    <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+      <span style={{fontSize:size*0.28,fontWeight:800,fontFamily:"monospace",color:clr,lineHeight:1}}>{score}</span>
+      <span style={{fontSize:8,color:C.dim}}>/ 100</span>
     </div>
   </div>;
 }
+
+function InteractionModal({interactions,onClose}){
+  const[idx,setIdx]=useState(0);
+  const[expandedFb,setExpandedFb]=useState({});
+  const int=interactions[idx];
+  const comments=int.comments||{};
+  const commentKeys=Object.keys(comments);
+
+  // Quick issue summary: Not Met or Partial items
+  const issues=[];
+  SCS.forEach(c=>{
+    const val=int.sc?.[c];
+    if(val==="Did Not Meet")issues.push({name:SC_FULL[c],status:"fail"});
+    else if(val==="Met Some")issues.push({name:SC_FULL[c],status:"partial"});
+  });
+  if(!int.proc)issues.push({name:"Procedures",status:"fail"});
+  if(!int.notes)issues.push({name:"Notes",status:"fail"});
+
+  const toggleFb=(key)=>setExpandedFb(p=>({...p,[key]:!p[key]}));
+
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+    onClick={onClose}>
+    <div onClick={e=>e.stopPropagation()} style={{background:C.panel,borderRadius:16,border:"1px solid "+C.border,
+      maxWidth:680,width:"100%",maxHeight:"90vh",overflow:"auto",padding:0}}>
+
+      {/* HEADER: agent context + action buttons */}
+      <div style={{padding:"14px 24px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:14,fontWeight:700}}>{int.agent}</span>
+          <span style={{fontSize:10,color:C.dim}}>{int.qa} {"·"} {(int.channel||"").toUpperCase()} {"·"} {new Date(int.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId}
+            target="_blank" rel="noopener noreferrer"
+            style={{padding:"5px 12px",borderRadius:5,background:C.cyan+"15",border:"1px solid "+C.cyan+"33",color:C.cyan,fontSize:10,fontWeight:600,textDecoration:"none"}}>
+            {"↗"} Stella</a>}
+          {int.url&&<a href={int.url} target="_blank" rel="noopener noreferrer"
+            style={{padding:"5px 12px",borderRadius:5,background:C.purple+"15",border:"1px solid "+C.purple+"33",color:C.purple,fontSize:10,fontWeight:600,textDecoration:"none"}}>
+            {"↗"} Gladly</a>}
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer",marginLeft:4}}>{"✕"}</button>
+        </div>
+      </div>
+
+      <div style={{padding:"20px 24px"}}>
+
+        {/* Multi-interaction selector */}
+        {interactions.length>1&&<div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
+          {interactions.map((it,i)=><button key={i} onClick={()=>{setIdx(i);setExpandedFb({});}}
+            style={{fontSize:10,padding:"4px 10px",borderRadius:4,border:"1px solid "+(i===idx?C.cyan:C.border),
+              background:i===idx?C.cyan+"15":C.card,color:i===idx?C.cyan:C.dim,cursor:"pointer"}}>
+            {new Date(it.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})} {"—"} {it.score}
+          </button>)}
+        </div>}
+
+        {/* SCORE GAUGE + DISTANCE */}
+        <div style={{display:"flex",alignItems:"center",gap:20,marginBottom:20}}>
+          <ScoreGauge score={int.score} size={90}/>
+          <div>
+            <div style={{fontSize:10,color:C.dim,marginBottom:4}}>Distance to target ({GOAL})</div>
+            {int.score>=GOAL?
+              <div style={{fontSize:13,fontWeight:600,color:C.green}}>{"✓"} At or above goal</div>:
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:int.score>=60?C.amber:C.red}}>{GOAL-int.score} points below</div>
+                <div style={{width:140,height:4,background:C.border,borderRadius:2,marginTop:6,overflow:"hidden"}}>
+                  <div style={{width:Math.round(int.score/GOAL*100)+"%",height:"100%",borderRadius:2,background:int.score>=60?C.amber:C.red}}/>
+                </div>
+              </div>}
+          </div>
+        </div>
+
+        {/* QUICK ISSUE SUMMARY */}
+        {issues.length>0&&<div style={{marginBottom:16,padding:"10px 14px",borderRadius:8,background:C.red+"08",border:"1px solid "+C.red+"20"}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>{"⚠"} Key Issues ({issues.length})</div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+            {issues.map((iss,i)=><span key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,
+              background:iss.status==="fail"?C.red+"15":C.amber+"15",color:iss.status==="fail"?C.red:C.amber,fontWeight:600}}>
+              {iss.name}{iss.status==="partial"?" (Partial)":""}
+            </span>)}
+          </div>
+        </div>}
+
+        {/* SERVICE COMMITMENTS — Grouped */}
+        <div style={{marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.5px"}}>Service Commitments</div>
+          {SC_GROUPS.map((g,gi)=><div key={gi} style={{marginBottom:10}}>
+            <div style={{fontSize:9,fontWeight:600,color:C.muted,marginBottom:4,paddingLeft:4}}>{g.label}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+              {g.codes.map(c=>{const val=int.sc?.[c];const met=val==="Met"||val==="Exceed";const partial=val==="Met Some";
+                return <div key={c} style={{padding:"7px 10px",borderRadius:5,fontSize:10,
+                  background:met?C.green+"08":partial?C.amber+"08":C.red+"08",
+                  borderLeft:"3px solid "+(met?C.green:partial?C.amber:C.red),
+                  display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{color:C.text}}>{SC_FULL[c]}</span>
+                  <span style={{fontWeight:700,fontSize:9,color:met?C.green:partial?C.amber:C.red}}>{met?"Met":partial?"Partial":"Not Met"}</span>
+                </div>;})}
+            </div>
+          </div>)}
+          <div style={{fontSize:9,fontWeight:600,color:C.muted,marginBottom:4,paddingLeft:4}}>Process & Compliance</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+            {[["Follows Procedures",int.proc],["Notes in Gladly",int.notes]].map(([lbl,val])=>
+              <div key={lbl} style={{padding:"7px 10px",borderRadius:5,fontSize:10,
+                background:val?C.green+"08":C.red+"08",borderLeft:"3px solid "+(val?C.green:C.red),
+                display:"flex",justifyContent:"space-between"}}>
+                <span>{lbl}</span><span style={{fontWeight:700,fontSize:9,color:val?C.green:C.red}}>{val?"Met":"Not Met"}</span>
+              </div>)}
+          </div>
+        </div>
+
+        {/* QA FEEDBACK — Collapsible */}
+        {commentKeys.length>0?<div style={{marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>QA Feedback ({commentKeys.length})</div>
+          {commentKeys.map((q,i)=>{
+            const text=comments[q];
+            const isLong=text.length>120;
+            const expanded=expandedFb[q];
+            const displayText=isLong&&!expanded?text.substring(0,120)+"...":text;
+            return <div key={i} style={{padding:"10px 14px",borderRadius:6,background:C.bg,marginBottom:6,borderLeft:"2px solid "+C.cyan+"44"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <span style={{fontSize:9,color:C.cyan,fontWeight:700}}>{q}</span>
+                {isLong&&<button onClick={()=>toggleFb(q)} style={{fontSize:9,color:C.cyan,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>{expanded?"Collapse":"Read more"}</button>}
+              </div>
+              <div style={{fontSize:11,color:C.text,lineHeight:1.6}}>{displayText}</div>
+            </div>;})}
+        </div>:
+        <div style={{padding:"12px 14px",borderRadius:6,background:C.bg,marginBottom:8}}>
+          <span style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>No written feedback for this evaluation</span>
+        </div>}
+
+      </div>
+    </div>
+  </div>;
+}
+
 
 // =================================================================
 // AGENT PROFILE PANEL
