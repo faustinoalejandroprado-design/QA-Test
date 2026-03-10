@@ -40,15 +40,18 @@ function getWeekStart(dateStr){
   const d = safeDate(dateStr); 
   
   if (mode === "mtd") {
+    // Return the 1st of the month to group everything by month
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString().substring(0,10);
   }
 
   const day = d.getUTCDay(); 
   let diff;
   if (mode === "qa") {
+    // QA Week: Wednesday to Tuesday
     const offset = day >= 3 ? day - 3 : day + 4;
     diff = d.getUTCDate() - offset;
   } else {
+    // Billing Week: Monday to Sunday
     diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
   }
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff)).toISOString().substring(0,10);
@@ -588,6 +591,7 @@ function useSort(defaultKey,defaultDir="desc"){
   };
   return{sk,sd,toggle,sortFn};
 }
+
 
 function DonutChart({value,total,color,size=64}){
   const pct=total?value/total:0;
@@ -1684,28 +1688,20 @@ export default function NextSkill(){
   }, []);
 
   const toggleWeekMode = (mode) => {
-    if (mode === weekMode || !D?.raw) return;
+    if (mode === weekMode) return;
     window.CURRENT_WEEK_MODE = mode;
     setWeekMode(mode);
     setRefreshing(true); 
     
     setTimeout(() => {
       try {
-        const newResult = processFiles(D.raw.qaText, D.raw.rosterTabs);
-        newResult.surveyData = D.surveyData;
-        newResult.raw = D.raw; 
-        
-        D = newResult;
-        WEEKS = newResult.weeks;
-        LATEST_WIDX = WEEKS.length - 1;
-        setData(newResult);
-        setWIdx(LATEST_WIDX); 
+        const newResult = processFiles(config.qaId, config.rosterId); // Triggering recalculation logic internally or via fetch
+        // To keep it simple and safe from quota issues, let's just trigger a re-fetch and process
       } catch(e) { console.error("Error recalculating weeks:", e); }
-      setRefreshing(false);
     }, 50);
   };
 
-  // NUEVA FUNCIÓN: Cierre automático de menú lateral al cambiar de tab
+  // NUEVA FUNCIÓN: Cambio de tab inteligente
   const changeTab = (newTab) => {
     setTab(newTab);
     if (newTab !== "dashboard") {
@@ -1719,13 +1715,11 @@ export default function NextSkill(){
   const alerts=useMemo(()=>!D?[]:generateAlerts(D.tls,wIdx),[data,wIdx]);
   const csatData=useMemo(()=>!D?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(D.tls,D.surveyData,D.rawInts),[data]);
   
+  // EFECTOS DE CARGA (Sin LocalStorage temporalmente)
   const handleRefresh=useCallback(async()=>{
     if(!config||refreshing)return;setRefreshing(true);
     try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
       if(!result.error){
-        localStorage.setItem('nextskill_cache', JSON.stringify({
-          raw: result.raw, surveyData: result.surveyData, timestamp: new Date().getTime()
-        }));
         D=result;WEEKS=result.weeks;LATEST_WIDX=WEEKS.length-1;
         setData(result);setLastUpdated(new Date());setWIdx(result.weeks.length-1);}
     }catch(e){}setRefreshing(false);
@@ -1733,33 +1727,12 @@ export default function NextSkill(){
 
   React.useEffect(()=>{
     if(initialLoad.current||!config)return;initialLoad.current=true;
-    
-    const cached = localStorage.getItem('nextskill_cache');
-    if (cached) {
-      try {
-        const parsed = JSON.parse(cached);
-        if (!parsed.raw || !parsed.raw.qaText) throw new Error("Invalid cache format");
-        const result = processFiles(parsed.raw.qaText, parsed.raw.rosterTabs);
-        result.surveyData = parsed.surveyData;
-        result.raw = parsed.raw;
-        D = result; WEEKS = result.weeks; LATEST_WIDX = WEEKS.length - 1;
-        setData(result); setWIdx(LATEST_WIDX);
-        setLastUpdated(new Date(parsed.timestamp));
-      } catch(e) { 
-        console.warn("Cache parse error", e); 
-        localStorage.removeItem('nextskill_cache'); 
-      }
-    }
-
-    setRefreshing(!cached);
+    setRefreshing(true);
     (async()=>{try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
-      if(result.error){ if(!cached) setLoadError(result.error); return;}
-      localStorage.setItem('nextskill_cache', JSON.stringify({
-         raw: result.raw, surveyData: result.surveyData, timestamp: new Date().getTime()
-      }));
+      if(result.error){ setLoadError(result.error); return;}
       D=result;WEEKS=result.weeks;LATEST_WIDX=WEEKS.length-1;
       setData(result);setWIdx(result.weeks.length-1);setLastUpdated(new Date());
-    }catch(e){ if(!cached) setLoadError(e.message); }
+    }catch(e){ setLoadError(e.message); }
     setRefreshing(false);
     })();
   },[config]);
@@ -1767,7 +1740,6 @@ export default function NextSkill(){
   React.useEffect(()=>{if(!config)return;
     intervalRef.current=setInterval(async()=>{try{const r=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
       if(!r.error){
-        localStorage.setItem('nextskill_cache', JSON.stringify({raw: r.raw, surveyData: r.surveyData, timestamp: new Date().getTime()}));
         D=r;WEEKS=r.weeks;LATEST_WIDX=WEEKS.length-1;setData(r);setLastUpdated(new Date());}}catch(e){}},REFRESH_INTERVAL);
     return()=>clearInterval(intervalRef.current);},[config]);
 
@@ -1781,6 +1753,13 @@ export default function NextSkill(){
     return()=>window.removeEventListener("popstate",onPop);
   },[]);
   const navPush=(state)=>window.history.pushState(state,"");
+
+  // Add robust trigger for weekMode toggle
+  React.useEffect(() => {
+    if(!config || !initialLoad.current) return;
+    handleRefresh();
+  }, [weekMode, handleRefresh, config]);
+
 
   if(showSetup) return <SetupScreen savedConfig={config} onDataReady={(d,cfg)=>{setData(d);setConfig(cfg);setWIdx(d.weeks.length-1);setLastUpdated(new Date());setShowSetup(false);}}/>;
   if(!D) return <LoadingScreen error={loadError} onSetup={()=>setShowSetup(true)}/>;
@@ -1904,7 +1883,7 @@ export default function NextSkill(){
 
     {/* FOOTER */}
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
-      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.4 {"·"} QA Coaching Platform {"·"} {D.tls.length} TLs {"·"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
+      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.5 {"·"} QA Coaching Platform {"·"} {D.tls.length} TLs {"·"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
 
     {/* INTERACTION MODAL */}
