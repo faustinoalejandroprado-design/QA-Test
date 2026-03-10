@@ -464,10 +464,10 @@ function genFocusCards(level,context,wIdx){
 // =================================================================
 // COLORS & STYLING
 // =================================================================
-const C={bg:"#0a0f1a",panel:"#0d1321",card:"#111b2e",border:"#1e293b50",text:"#e2e8f0",dim:"#94a3b8",
+const C={bg:"#0b1120",panel:"#0f1729",card:"#131d33",border:"#1c2a42",text:"#e2e8f0",dim:"#94a3b8",
   muted:"#475569",cyan:"#06b6d4",blue:"#3b82f6",green:"#34d399",red:"#f87171",amber:"#fbbf24",
-  purple:"#a78bfa",orange:"#f97316",teal:"#14b8a6",glass:"rgba(17,27,46,0.7)",glow:"#06b6d415"};
-const cs={background:C.glass,borderRadius:12,border:"1px solid "+C.border,padding:16,backdropFilter:"blur(12px)"};
+  purple:"#a78bfa",orange:"#f97316",teal:"#14b8a6"};
+const cs={background:C.card,borderRadius:12,border:"1px solid "+C.border,padding:16};
 
 // =================================================================
 // GOOGLE SHEETS FETCH
@@ -923,87 +923,188 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
   const atGoal=scored.filter(a=>a.w[wIdx]>=GOAL).length;
   const pct72=scored.length?Math.round(atGoal/scored.length*100):0;
   const wow=wowDelta(allAgents,wIdx);
-  const cards=genFocusCards("campaign",null,wIdx);
+  const critical=allAgents.filter(a=>classify(a,wIdx).cat==="Critical");
   const catCounts={};
   allAgents.forEach(a=>{const c=classify(a,wIdx);catCounts[c.cat]=(catCounts[c.cat]||0)+1;});
   const catData=Object.entries(catCounts).map(([cat,count])=>{
     const colors={Stable:"#4ade80",Monitor:"#facc15",Convertible:"#38bdf8",Stagnant:"#fb923c",Regressing:"#f87171",Critical:"#ef4444","No Data":"#555"};
     return{cat,count,color:colors[cat]||"#555"};});
+  const trendData=WEEKS.map((wk,i)=>{const s=allAgents.filter(a=>a.w[i]!=null);
+    return{wk,avg:s.length?+(s.reduce((sum,a)=>sum+a.w[i],0)/s.length).toFixed(1):null};});
+
+  // Helper for initials
+  const initials=(name)=>{const p=name.split(" ");return(p[0]?.[0]||"")+(p[p.length-1]?.[0]||"");};
+  const siteColors={HMO:"#3b82f6",JAM:"#a78bfa",PAN:"#f59e0b"};
 
   return <div>
     <HistoricalBanner wIdx={wIdx}/>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      <KpiCard value={avg} label="QA Score" color={C.cyan} delta={wow} icon={"\u2300"}/>
-      <KpiCard value={pct72+"%"} label={"\u2265 "+GOAL} color={C.green} icon={"\u2713"}/>
-      <KpiCard value={scored.length} label="Evaluated" color={C.blue} icon={"\ud83d\udc65"}/>
-      <KpiCard value={D.tls.length} label="Team Leads" color={C.purple} icon={"\u2302"}/>
-    </div>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      {cards.map((c,i)=><FocusCard key={i} card={c} onClick={c.action?()=>setCatFilter(c.action):c.onClick}/>)}
-    </div>
-    {csatFindings&&csatFindings.length>0&&<div style={{...cs,marginBottom:12}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:10}}>CSAT-QA Insights</div>
-      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {csatFindings.slice(0,5).map((f,i)=>{
-          const sev=f.severity;
-          const clr=sev==="critical"?C.red:sev==="warning"?C.amber:C.teal;
-          const ic=sev==="critical"?"\u26d4":sev==="warning"?"\u26a0":"\u2139";
-          return <div key={i} style={{padding:"10px 14px",borderRadius:8,background:clr+"06",border:"1px solid "+clr+"20",
-            borderLeft:"3px solid "+clr,display:"flex",gap:10,alignItems:"flex-start",transition:"all .15s",cursor:"default"}}
-            onMouseEnter={e=>{e.currentTarget.style.background=clr+"12";}} onMouseLeave={e=>{e.currentTarget.style.background=clr+"06";}}>
-            <div style={{width:28,height:28,borderRadius:6,background:clr+"15",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-              <span style={{fontSize:13}}>{ic}</span>
+
+    {/* ===== MAIN GRID: 35% left / 65% right ===== */}
+    <div style={{display:"grid",gridTemplateColumns:"380px 1fr",gap:16,marginBottom:16}}>
+
+      {/* LEFT COLUMN */}
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+
+        {/* KPI ROW: QA Score + >= 72 + Critical */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {/* QA Score - green bg */}
+          <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div style={{fontSize:10,color:"#6ee7b7",fontWeight:500}}>QA Score</div>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 14l4-4 3 3 5-7" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:2}}>{f.agent}</div>
-              <div style={{fontSize:10,color:clr,lineHeight:1.4}}>{f.msg}</div>
+            <div style={{fontSize:32,fontWeight:800,color:"#34d399",fontFamily:"'Geist Mono',monospace",letterSpacing:"-2px",lineHeight:1,marginTop:6}}>{avg}</div>
+            <div style={{marginTop:4}}>{wow!=null&&<WoWBadge delta={wow}/>}</div>
+            <div style={{fontSize:9,color:"#6ee7b7",marginTop:4,opacity:.7}}>Goal {"≥"} score of {GOAL}</div>
+          </div>
+
+          {/* >= 72 percentage */}
+          <div style={{background:C.card,borderRadius:12,border:"1px solid "+C.border,padding:16,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:10,color:C.dim,fontWeight:500}}>{"≥"} {GOAL}</div>
+              <div style={{fontSize:28,fontWeight:800,color:C.text,fontFamily:"'Geist Mono',monospace",letterSpacing:"-1px",lineHeight:1,marginTop:6}}>{pct72}%</div>
             </div>
-          </div>;})}
-      </div>
-    </div>}
-    <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12,marginBottom:16}}>
-      <div style={{...cs}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Weekly Score Trend</div>
-        <ResponsiveContainer width="100%" height={200}>
-          <AreaChart data={WEEKS.map((wk,i)=>{const s=allAgents.filter(a=>a.w[i]!=null);
-            return{wk,avg:s.length?(s.reduce((sum,a)=>sum+a.w[i],0)/s.length).toFixed(1):null};})}>
-            <defs><linearGradient id="campG" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={C.cyan} stopOpacity={0.3}/><stop offset="95%" stopColor={C.cyan} stopOpacity={0}/>
-            </linearGradient></defs>
-            <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/>
-            <XAxis dataKey="wk" tick={{fontSize:9,fill:C.muted}} axisLine={false}/>
-            <YAxis domain={[40,85]} tick={{fontSize:9,fill:C.muted}} axisLine={false} width={30}/>
-            <Tooltip content={<Tp/>}/>
-            <ReferenceLine y={GOAL} stroke={C.green+"66"} strokeDasharray="4 4"/>
-            <Area type="monotone" dataKey="avg" name="Avg Score" stroke={C.cyan} fill="url(#campG)" strokeWidth={2} dot={{r:3,fill:C.cyan}}/>
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-      <div style={{...cs}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Agent Categories</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:8,justifyContent:"center",marginBottom:8}}>
-          {catData.sort((a,b)=>b.count-a.count).map(d=><div key={d.cat} onClick={()=>setCatFilter(catFilter===d.cat?null:d.cat)}
-            style={{display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"8px 6px",borderRadius:8,cursor:"pointer",minWidth:70,
-              background:catFilter===d.cat?d.color+"12":"transparent",border:catFilter===d.cat?"1px solid "+d.color+"33":"1px solid transparent",transition:"all .2s"}}
-            onMouseEnter={e=>e.currentTarget.style.background=d.color+"08"} onMouseLeave={e=>{if(catFilter!==d.cat)e.currentTarget.style.background="transparent";}}>
             <div style={{position:"relative"}}>
-              <DonutChart value={d.count} total={scored.length} color={d.color} size={52}/>
+              <DonutChart value={atGoal} total={scored.length} color={C.green} size={52}/>
               <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{fontSize:13,fontWeight:800,fontFamily:"monospace",color:d.color}}>{d.count}</span>
+                <span style={{fontSize:10,fontWeight:700,fontFamily:"monospace",color:C.green}}>{pct72}%</span>
               </div>
             </div>
-            <span style={{fontSize:9,color:catFilter===d.cat?d.color:C.dim,fontWeight:catFilter===d.cat?700:500,textAlign:"center"}}>{d.cat}</span>
-          </div>)}
+          </div>
         </div>
-        {catFilter&&<div style={{textAlign:"center"}}><button onClick={()=>setCatFilter(null)} style={{fontSize:9,color:C.cyan,background:C.cyan+"10",border:"1px solid "+C.cyan+"33",borderRadius:4,padding:"3px 12px",cursor:"pointer"}}>Clear filter</button></div>}
+
+        {/* Critical Agents - red bg */}
+        <div onClick={()=>setCatFilter(catFilter==="Critical"?null:"Critical")}
+          style={{background:"#2a0f0f",borderRadius:12,border:"1px solid #4a1c1c",padding:16,cursor:"pointer",transition:"all .15s"}}
+          onMouseEnter={e=>e.currentTarget.style.background="#331414"} onMouseLeave={e=>e.currentTarget.style.background="#2a0f0f"}>
+          <div style={{fontSize:10,color:"#fca5a5",fontWeight:500,marginBottom:4}}>Critical Agents</div>
+          <div style={{fontSize:28,fontWeight:800,color:"#f87171",fontFamily:"'Geist Mono',monospace",letterSpacing:"-1px",lineHeight:1}}>{critical.length}</div>
+          <div style={{fontSize:10,color:"#fca5a5",marginTop:6,opacity:.8,lineHeight:1.3}}>
+            {critical.slice(0,3).map(a=>a.n).join(", ")}{critical.length>3?" +"+String(critical.length-3)+" more":""}
+          </div>
+        </div>
+
+        {/* CSAT-QA Insights */}
+        {csatFindings&&csatFindings.length>0&&<div style={{...cs,flex:1}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>CSAT-QA Insights</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {csatFindings.slice(0,5).map((f,i)=>{
+              const sev=f.severity;
+              const clr=sev==="critical"?C.red:sev==="warning"?C.amber:C.teal;
+              const ic=sev==="critical"?"\u26d4":sev==="warning"?"\u26a0":"\u2139";
+              return <div key={i} style={{padding:"10px 12px",borderRadius:8,background:clr+"06",border:"1px solid "+clr+"18",
+                borderLeft:"3px solid "+clr,display:"flex",gap:10,alignItems:"flex-start",transition:"background .15s"}}
+                onMouseEnter={e=>{e.currentTarget.style.background=clr+"10";}} onMouseLeave={e=>{e.currentTarget.style.background=clr+"06";}}>
+                <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{ic}</span>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text}}>{f.agent}</div>
+                  <div style={{fontSize:10,color:clr,lineHeight:1.4,marginTop:2}}>{f.msg}</div>
+                </div>
+              </div>;})}
+          </div>
+        </div>}
+      </div>
+
+      {/* RIGHT COLUMN */}
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+
+        {/* Weekly Score Trend - full width */}
+        <div style={{...cs}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Weekly Score Trend</div>
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={trendData}>
+              <defs>
+                <linearGradient id="campG" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor={C.cyan} stopOpacity={0.12}/>
+                  <stop offset="100%" stopColor={C.cyan} stopOpacity={0.01}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid stroke={C.border+"40"} strokeDasharray="3 3"/>
+              <XAxis dataKey="wk" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
+              <YAxis domain={[0,100]} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} width={32}/>
+              <Tooltip content={<Tp/>}/>
+              <ReferenceLine y={GOAL} stroke={C.green+"55"} strokeDasharray="6 3" label={{value:"Goal "+GOAL,position:"right",fill:C.dim,fontSize:10}}/>
+              <Area type="monotone" dataKey="avg" name="Avg Score" stroke={C.cyan} fill="url(#campG)" strokeWidth={2.5}
+                dot={{r:4,fill:C.cyan,stroke:C.bg,strokeWidth:2}} activeDot={{r:6,fill:C.cyan,stroke:"#fff",strokeWidth:2}}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* BOTTOM ROW: Categories + TL Rankings side by side */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+
+          {/* Agent Categories with donuts */}
+          <div style={{...cs}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Agent Categories</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+              {catData.sort((a,b)=>b.count-a.count).slice(0,6).map(d=><div key={d.cat} onClick={()=>setCatFilter(catFilter===d.cat?null:d.cat)}
+                style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"10px 4px",borderRadius:8,cursor:"pointer",
+                  background:catFilter===d.cat?d.color+"12":"transparent",border:catFilter===d.cat?"1px solid "+d.color+"33":"1px solid transparent",transition:"all .15s"}}
+                onMouseEnter={e=>{if(catFilter!==d.cat)e.currentTarget.style.background=d.color+"08";}} onMouseLeave={e=>{if(catFilter!==d.cat)e.currentTarget.style.background="transparent";}}>
+                <div style={{position:"relative"}}>
+                  <DonutChart value={d.count} total={scored.length} color={d.color} size={56}/>
+                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:d.color}}>{d.count}</span>
+                  </div>
+                </div>
+                <span style={{fontSize:9,color:catFilter===d.cat?d.color:C.dim,fontWeight:500,textAlign:"center"}}>{d.cat}</span>
+              </div>)}
+            </div>
+            {catFilter&&<div style={{textAlign:"center",marginTop:8}}><button onClick={()=>setCatFilter(null)} style={{fontSize:9,color:C.cyan,background:C.cyan+"10",border:"1px solid "+C.cyan+"33",borderRadius:12,padding:"4px 14px",cursor:"pointer"}}>Clear filter</button></div>}
+          </div>
+
+          {/* Team Lead Rankings */}
+          <div style={{...cs,overflow:"hidden"}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Team Lead Rankings</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead><tr style={{borderBottom:"1px solid "+C.border}}>
+                {["Team Lead","","Avg","Trend",""].map((h,hi)=><th key={hi} style={{textAlign:"left",padding:"6px 8px",color:C.dim,fontWeight:600,fontSize:9}}>{h}</th>)}
+              </tr></thead>
+              <tbody>{filteredTLs.map((t,i)=>{
+                const ta=t.agents.filter(a=>a.w[wIdx]!=null);
+                const tavg=ta.length?+(ta.reduce((s,a)=>s+a.w[wIdx],0)/ta.length).toFixed(1):0;
+                const tw=wowDelta(t.agents,wIdx);
+                const sc=siteColors[t.site]||C.muted;
+                const rangeLbl=tavg>=GOAL?"72+":tavg>=60?"60-71":tavg<60?("< 60"):"--";
+                const rangeClr=tavg>=GOAL?C.green:tavg>=60?C.amber:C.red;
+                const rangeBg=tavg>=GOAL?"#0c2d1e":tavg>=60?"#2d2206":"#2a0f0f";
+                return <tr key={i} style={{borderBottom:"1px solid "+C.border+"44",cursor:"pointer",transition:"background .1s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=C.cyan+"06";e.currentTarget.querySelector(".va")&&(e.currentTarget.querySelector(".va").style.opacity="1");}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.querySelector(".va")&&(e.currentTarget.querySelector(".va").style.opacity="0.4");}}
+                  onClick={()=>onSelectTL(t)}>
+                  <td style={{padding:"10px 8px"}}>
+                    <div style={{fontWeight:600,fontSize:11}}>{t.name}</div>
+                  </td>
+                  <td style={{padding:"10px 4px"}}>
+                    <div style={{width:26,height:26,borderRadius:"50%",background:sc+"22",border:"1px solid "+sc+"44",
+                      display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:sc}}>
+                      {initials(t.name)}
+                    </div>
+                  </td>
+                  <td style={{padding:"10px 8px"}}>
+                    <span style={{fontWeight:700,fontFamily:"monospace",fontSize:11,padding:"3px 10px",borderRadius:5,
+                      background:rangeBg,color:rangeClr,border:"1px solid "+rangeClr+"22"}}>{rangeLbl}</span>
+                  </td>
+                  <td style={{padding:"10px 8px"}}>{tw!=null&&<WoWBadge delta={tw}/>}</td>
+                  <td style={{padding:"10px 8px"}}>
+                    <button className="va" onClick={e=>{e.stopPropagation();onSelectTL(t);}}
+                      style={{fontSize:9,padding:"4px 10px",borderRadius:12,border:"1px solid "+C.cyan+"44",
+                        background:C.cyan+"08",color:C.cyan,cursor:"pointer",fontWeight:600,opacity:.4,transition:"opacity .15s"}}>
+                      View Agents
+                    </button>
+                  </td>
+                </tr>;})}</tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
 
-    {/* When category is filtered, show agents directly */}
-    {catFilter&&<div style={{...cs}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.dim}}>{catFilter} Agents</div>
-        <button onClick={()=>setCatFilter(null)} style={{fontSize:10,color:C.cyan,background:"none",border:"1px solid "+C.cyan+"44",borderRadius:4,padding:"3px 10px",cursor:"pointer"}}>Show All</button>
+    {/* CATEGORY FILTER: Agent list when active */}
+    {catFilter&&<div style={{...cs,marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{catFilter} Agents</div>
+        <button onClick={()=>setCatFilter(null)} style={{fontSize:10,color:C.cyan,background:"none",border:"1px solid "+C.cyan+"44",borderRadius:12,padding:"4px 14px",cursor:"pointer"}}>Show All</button>
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
         <SortHeader columns={[["name","Agent"],["tl","Team Lead"],["site","Site",50],["score","Score",60],["trend","Trend",60],["risk","Risk",60]]}
@@ -1011,38 +1112,14 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
         <tbody>{filteredTLs.flatMap(t=>t.agents.filter(a=>classify(a,wIdx).cat===catFilter).map(a=>({a,t,name:a.n,tl:t.name,site:t.site,score:a.w[wIdx]||0,trend:getAgentTrend(a,wIdx)||0,risk:getRiskLevel(a,wIdx).level})))
           .sort((x,y)=>tlSort.sortFn(x[tlSort.sk],y[tlSort.sk])).map(({a,t},i)=>{
           const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx),risk=getRiskLevel(a,wIdx);
-          return <tr key={i} onClick={()=>onSelectAgent(a,t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}
-            onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+          return <tr key={i} onClick={()=>onSelectAgent(a,t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"33"}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"06"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <td style={{padding:"8px",fontWeight:600}}>{a.n}</td>
             <td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.name}</td>
             <td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.site}</td>
             <td style={{padding:"8px",fontWeight:700,fontFamily:"monospace",color:cat.color}}>{a.w[wIdx]||"--"}</td>
             <td style={{padding:"8px"}}>{tr!=null&&<WoWBadge delta={tr}/>}</td>
             <td style={{padding:"8px"}}><RiskBadge level={risk.level}/></td>
-          </tr>;})}</tbody>
-      </table>
-    </div>}
-    {!catFilter&&<div style={{...cs}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Team Lead Rankings</div>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-        <thead><tr style={{borderBottom:"1px solid "+C.border}}>
-          {["Team Lead","Site","Agents","Avg","\\u2265 72","Trend"].map(h=><th key={h} style={{textAlign:"left",padding:"6px 10px",color:C.dim,fontWeight:600,fontSize:10}}>{h}</th>)}
-        </tr></thead>
-        <tbody>{filteredTLs.filter(t=>!catFilter||t.agents.some(a=>classify(a,wIdx).cat===catFilter)).map((t,i)=>{
-          const ta=t.agents.filter(a=>a.w[wIdx]!=null);
-          const tavg=ta.length?(ta.reduce((s,a)=>s+a.w[wIdx],0)/ta.length).toFixed(1):"--";
-          const tw=wowDelta(t.agents,wIdx);
-          return <tr key={i} onClick={()=>onSelectTL(t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"22"}}
-            onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            <td style={{padding:"8px 10px",fontWeight:600}}>{t.name}</td>
-            <td style={{padding:"8px 10px",color:C.dim}}>{t.site}</td>
-            <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{t.agents.length}</td>
-            <td style={{padding:"8px 10px"}}><span style={{fontWeight:700,fontFamily:"'Geist Mono',monospace",fontSize:12,
-              padding:"3px 8px",borderRadius:5,
-              background:parseFloat(tavg)>=GOAL?C.green+"15":parseFloat(tavg)>=60?C.amber+"15":C.red+"15",
-              color:parseFloat(tavg)>=GOAL?C.green:parseFloat(tavg)>=60?C.amber:C.red}}>{tavg}</span></td>
-            <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{ta.filter(a=>a.w[wIdx]>=GOAL).length}/{ta.length}</td>
-            <td style={{padding:"8px 10px"}}>{tw!=null&&<WoWBadge delta={tw}/>}</td>
           </tr>;})}</tbody>
       </table>
     </div>}
@@ -1451,11 +1528,11 @@ export default function NextSkill(){
   const onSelectTL=(tl)=>{setSelTL(tl);setSelAgent(null);setShowProfile(false);setTab("dashboard");setCatFilter(null);navPush({tab:"dashboard",tl});};
   const onSelectAgent=(a,tl)=>{setSelAgent(a);setSelAgentTL(tl||selTL);setShowProfile(true);setTab("dashboard");navPush({tab:"dashboard",tl:tl||selTL,agent:a,agentTL:tl||selTL});};
 
-  const sel={fontSize:11,background:C.bg,border:"1px solid "+C.border,borderRadius:6,color:C.text,padding:"6px 10px",fontFamily:"monospace",cursor:"pointer",outline:"none"};
+  const sel={fontSize:11,background:C.bg,border:"1px solid "+C.border,borderRadius:20,color:C.text,padding:"7px 14px",fontFamily:"inherit",cursor:"pointer",outline:"none"};
 
   return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Inter',-apple-system,'Segoe UI',system-ui,sans-serif"}}>
     {/* HEADER */}
-    <div style={{background:C.panel,borderBottom:"1px solid "+C.border,padding:"12px 28px",backdropFilter:"blur(12px)"}}>
+    <div style={{background:C.panel,borderBottom:"1px solid "+C.border,padding:"12px 28px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:16}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg><span style={{fontSize:16,fontWeight:800,letterSpacing:"-0.5px",color:C.text}}>Next<span style={{color:C.cyan}}>Skill</span></span></div>
@@ -1539,7 +1616,7 @@ export default function NextSkill(){
 
     {/* FOOTER */}
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
-      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.2 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
+      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.3 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
 
 
