@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Papa from "papaparse";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, ReferenceLine, AreaChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, ReferenceLine, AreaChart, Area } from "recharts";
 
 let D=null;
 let WEEKS=[];
@@ -949,14 +949,22 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
         {/* Radar / Spider Chart */}
         <div style={{...cs,marginBottom:12}}>
           <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:4}}>Skills Spider Chart</div>
-          <ResponsiveContainer width="100%" height={260}>
-            <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-              <PolarGrid stroke={C.border}/>
-              <PolarAngleAxis dataKey="skill" tick={{fontSize:9,fill:C.dim}}/>
-              <PolarRadiusAxis angle={90} domain={[0,100]} tick={{fontSize:8,fill:C.muted}} axisLine={false}/>
-              <Radar name="Met %" dataKey="value" stroke={C.cyan} fill={C.cyan} fillOpacity={0.15} strokeWidth={2} dot={{r:3,fill:C.cyan}}/>
-            </RadarChart>
-          </ResponsiveContainer>
+          {(()=>{
+            const size=240,cx=size/2,cy=size/2,r=size*0.38,n=radarData.length;
+            const angles=radarData.map((_,i)=>(Math.PI*2*i/n)-Math.PI/2);
+            const gridLevels=[25,50,75,100];
+            const pts=radarData.map((d,i)=>{const a=angles[i];const pr=d.value/100*r;return[cx+pr*Math.cos(a),cy+pr*Math.sin(a)];});
+            const polyStr=pts.map(p=>p.join(",")).join(" ");
+            return <svg width="100%" height={size} viewBox={`0 0 ${size} ${size}`}>
+              {gridLevels.map(lv=>{const gr=lv/100*r;return <polygon key={lv} points={angles.map(a=>`${cx+gr*Math.cos(a)},${cy+gr*Math.sin(a)}`).join(" ")} fill="none" stroke={C.border} strokeWidth={0.5}/>;})}
+              {angles.map((a,i)=><line key={i} x1={cx} y1={cy} x2={cx+r*Math.cos(a)} y2={cy+r*Math.sin(a)} stroke={C.border} strokeWidth={0.5}/>)}
+              <polygon points={polyStr} fill={C.cyan+"22"} stroke={C.cyan} strokeWidth={2}/>
+              {pts.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r={3.5} fill={C.cyan} stroke={C.bg} strokeWidth={1.5}/>)}
+              {radarData.map((d,i)=>{const a=angles[i];const lx=cx+(r+20)*Math.cos(a);const ly=cy+(r+20)*Math.sin(a);
+                const clr=d.value>=70?C.green:d.value>=50?C.amber:C.red;
+                return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fill={clr} fontSize={8} fontWeight={600}>{d.skill}</text>;})}
+            </svg>;
+          })()}
         </div>
 
         {/* Strengths & Opportunities cards */}
@@ -1335,8 +1343,8 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
                 const rangeClr=tavg>=GOAL?C.green:tavg>=60?C.amber:C.red;
                 const rangeBg=tavg>=GOAL?"#0c2d1e":tavg>=60?"#2d2206":"#2a0f0f";
                 return <tr key={i} style={{borderBottom:"1px solid "+C.border+"44",cursor:"pointer",transition:"background .1s"}}
-                  onMouseEnter={e=>{e.currentTarget.style.background=C.cyan+"06";e.currentTarget.querySelector(".va")&&(e.currentTarget.querySelector(".va").style.opacity="1");}}
-                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";e.currentTarget.querySelector(".va")&&(e.currentTarget.querySelector(".va").style.opacity="0.4");}}
+                  onMouseEnter={e=>{e.currentTarget.style.background=C.cyan+"06";const b=e.currentTarget.lastElementChild?.firstElementChild;if(b)b.style.opacity="1";}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="transparent";const b=e.currentTarget.lastElementChild?.firstElementChild;if(b)b.style.opacity="0.4";}}
                   onClick={()=>onSelectTL(t)}>
                   <td style={{padding:"10px 8px"}}>
                     <div style={{fontWeight:600,fontSize:11}}>{t.name}</div>
@@ -1353,7 +1361,7 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
                   </td>
                   <td style={{padding:"10px 8px"}}>{tw!=null&&<WoWBadge delta={tw}/>}</td>
                   <td style={{padding:"10px 8px"}}>
-                    <button className="va" onClick={e=>{e.stopPropagation();onSelectTL(t);}}
+                    <button onClick={e=>{e.stopPropagation();onSelectTL(t);}}
                       style={{fontSize:9,padding:"4px 10px",borderRadius:12,border:"1px solid "+C.cyan+"44",
                         background:C.cyan+"08",color:C.cyan,cursor:"pointer",fontWeight:600,opacity:.4,transition:"opacity .15s"}}>
                       View Agents
