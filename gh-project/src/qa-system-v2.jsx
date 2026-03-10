@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Papa from "papaparse";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, ReferenceLine, AreaChart, Area } from "recharts";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, ReferenceLine, AreaChart, Area, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis } from "recharts";
 
 let D=null;
 let WEEKS=[];
@@ -780,6 +780,272 @@ function InteractionModal({interactions,onClose}){
 // AGENT PROFILE PANEL
 // =================================================================
 function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction}){
+  if(!agent)return null;
+  const[profileTab,setProfileTab]=useState("overview");
+  const risk=getRiskLevel(agent,wIdx);
+  const strengths=getStrengths(agent);
+  const opps=getOpportunities(agent);
+  const agentInts=(interactions||[]).filter(i=>i.agent===agent.n);
+  const survey=surveyData?.agents?.[agent.n];
+  const trendData=agent.w.map((v,i)=>v!=null?{wk:WEEKS[i],score:v}:null).filter(Boolean);
+  const selectedWeekISO=weekISO?.[wIdx]||"";
+  const weekEntries=(survey?.entries||[]).filter(e=>e.date&&getWeekStart(e.date)===selectedWeekISO);
+  const weekRatings=weekEntries.filter(e=>e.rating!=null).map(e=>e.rating);
+  const weekAvg=weekRatings.length?+(weekRatings.reduce((s,v)=>s+v,0)/weekRatings.length).toFixed(1):null;
+  const weekComments=weekEntries.filter(e=>e.comment).map(e=>e.comment);
+
+  // Streak calculation
+  let streak=0;
+  for(let i=wIdx;i>=0;i--){if(agent.w[i]!=null&&agent.w[i]>=GOAL)streak++;else break;}
+
+  // Team percentile
+  const teamAgents=tl?.agents||[];
+  const teamScores=teamAgents.map(a=>a.w[wIdx]).filter(v=>v!=null).sort((a,b)=>a-b);
+  const myScore=agent.w[wIdx];
+  const percentile=myScore!=null&&teamScores.length?Math.round((teamScores.filter(s=>s<myScore).length/teamScores.length)*100):null;
+
+  // Radar data for skills
+  const radarData=SCS.map(c=>({skill:SC_FULL[c],value:agent.sc[c]||0,fullMark:100}));
+
+  // Initials
+  const parts=agent.n.split(" ");
+  const ini=(parts[0]?.[0]||"")+(parts[parts.length-1]?.[0]||"");
+
+  const csatCorr=csatData?.agentMap?.[agent.n];
+  const qaScore=agent.w[wIdx];
+
+  // Tab style helper
+  const tabSt=(t)=>({fontSize:11,fontWeight:profileTab===t?700:500,padding:"8px 16px",cursor:"pointer",
+    color:profileTab===t?C.cyan:C.dim,borderBottom:profileTab===t?"2px solid "+C.cyan:"2px solid transparent",
+    background:"none",border:"none",transition:"all .15s"});
+
+  return <div style={{width:460,minWidth:460,background:C.panel,borderLeft:"1px solid "+C.border,
+    overflowY:"auto",padding:0,height:"calc(100vh - 120px)",position:"sticky",top:0}}>
+
+    {/* HEADER */}
+    <div style={{padding:"20px 24px 0",borderBottom:"1px solid "+C.border}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:42,height:42,borderRadius:"50%",background:C.cyan+"20",border:"2px solid "+C.cyan+"44",
+            display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700,color:C.cyan}}>
+            {ini}
+          </div>
+          <div>
+            <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>Agent Growth Profile</div>
+            <h2 style={{fontSize:17,fontWeight:700,margin:"2px 0 0"}}>{agent.n}</h2>
+            <div style={{fontSize:10,color:C.dim,marginTop:1}}>{tl?.name||"--"} {"\u00b7"} {tl?.site||"--"}</div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:6,alignItems:"center"}}>
+          <button style={{fontSize:10,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.cyan+"44",
+            background:C.cyan+"10",color:C.cyan,cursor:"pointer",fontWeight:600}}>+ Log Coaching</button>
+          <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer"}}>{"\u2715"}</button>
+        </div>
+      </div>
+      {/* TABS */}
+      <div style={{display:"flex",gap:0}}>
+        <button onClick={()=>setProfileTab("overview")} style={tabSt("overview")}>Overview</button>
+        <button onClick={()=>setProfileTab("skills")} style={tabSt("skills")}>Skills & Behaviors</button>
+        <button onClick={()=>setProfileTab("history")} style={tabSt("history")}>History</button>
+      </div>
+    </div>
+
+    <div style={{padding:"16px 24px 24px"}}>
+
+      {/* =================== OVERVIEW TAB =================== */}
+      {profileTab==="overview"&&<>
+        {/* 2x2 KPI Grid */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          <div style={{background:"#0c2d1e",borderRadius:10,border:"1px solid #1a4a32",padding:12}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <span style={{fontSize:9,color:"#6ee7b7",fontWeight:500}}>QA SCORE</span>
+              <span style={{fontSize:11}}>{qaScore!=null&&qaScore>=GOAL?"\u2b06":qaScore!=null?"\u26a0":""}</span>
+            </div>
+            <div style={{fontSize:26,fontWeight:800,color:C.green,fontFamily:"monospace",lineHeight:1,marginTop:4}}>
+              {qaScore!=null?qaScore+"":"--"}
+            </div>
+            {streak>=2&&<div style={{fontSize:9,marginTop:4,color:"#fbbf24"}}>{"\ud83d\udd25"} {streak} weeks {"\u2265"} {GOAL}</div>}
+            {percentile!=null&&percentile>=75&&<div style={{fontSize:9,marginTop:2,color:C.teal}}>Top {100-percentile}% of team</div>}
+          </div>
+          <div style={{...cs,padding:12}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <span style={{fontSize:9,color:C.dim,fontWeight:500}}>CSAT</span>
+              <span style={{fontSize:11}}>{weekAvg!=null&&weekAvg>=4?"\u2b06":""}</span>
+            </div>
+            <div style={{fontSize:26,fontWeight:800,color:weekAvg!=null?(weekAvg>=4?C.green:weekAvg>=3?C.amber:C.red):C.dim,fontFamily:"monospace",lineHeight:1,marginTop:4}}>
+              {weekAvg!=null?weekAvg:"--"}
+            </div>
+            <div style={{fontSize:9,color:C.dim,marginTop:4}}>{weekRatings.length} surveys this week</div>
+          </div>
+          <div style={{...cs,padding:12,borderLeft:"3px solid "+(risk.level==="HIGH"?C.red:risk.level==="MEDIUM"?C.amber:C.green)}}>
+            <span style={{fontSize:9,color:C.dim,fontWeight:500}}>RISK</span>
+            <div style={{marginTop:4}}><RiskBadge level={risk.level}/></div>
+            {risk.reasons.length>0&&<div style={{fontSize:9,color:risk.level==="HIGH"?C.red:C.amber,marginTop:4}}>{risk.reasons[0]}</div>}
+          </div>
+          <div style={{...cs,padding:12}}>
+            <span style={{fontSize:9,color:C.dim,fontWeight:500}}>EVALS</span>
+            <div style={{fontSize:26,fontWeight:800,color:C.text,fontFamily:"monospace",lineHeight:1,marginTop:4}}>{agentInts.length}</div>
+            <div style={{fontSize:9,color:C.dim,marginTop:4}}>Total evaluations</div>
+          </div>
+        </div>
+
+        {/* Score Trend */}
+        <div style={{...cs,marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Weekly Trend</div>
+          <ResponsiveContainer width="100%" height={100}>
+            <AreaChart data={trendData}>
+              <defs><linearGradient id={"agGr_"+agent.n.replace(/\s/g,"")} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={C.cyan} stopOpacity={0.15}/><stop offset="100%" stopColor={C.cyan} stopOpacity={0.01}/>
+              </linearGradient></defs>
+              <CartesianGrid stroke={C.border+"40"} strokeDasharray="3 3"/>
+              <XAxis dataKey="wk" tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false}/>
+              <YAxis domain={[0,100]} tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false} width={26}/>
+              <ReferenceLine y={GOAL} stroke={C.green+"55"} strokeDasharray="4 4"/>
+              <Area type="monotone" dataKey="score" stroke={C.cyan} fill={"url(#agGr_"+agent.n.replace(/\s/g,"")+")"} strokeWidth={2} dot={{r:3,fill:C.cyan}}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* CSAT vs QA Correlation — PRESERVED LOGIC */}
+        {csatCorr&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.teal}}>
+          <div style={{fontSize:10,fontWeight:600,color:C.teal,marginBottom:6}}>CSAT vs QA Correlation</div>
+          <div style={{display:"flex",gap:16,marginBottom:6}}>
+            <div><span style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.teal}}>{csatCorr.csatRating}</span><span style={{fontSize:10,color:C.dim}}> {"\u2605"} CSAT</span></div>
+            <div><span style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.cyan}}>{csatCorr.qaScore||"--"}</span><span style={{fontSize:10,color:C.dim}}> QA</span></div>
+          </div>
+          {(()=>{const al=csatCorr.alignment;
+            const labels={aligned:{text:"Aligned",desc:"Customer satisfaction matches QA performance",color:C.green},
+              csat_leads:{text:"CSAT Leads",desc:"Customer is happy, but QA shows process gaps \u2014 coach on procedures",color:C.amber},
+              qa_leads:{text:"QA Leads",desc:"Meets QA standards but customer unhappy \u2014 focus on soft skills & empathy",color:C.amber},
+              both_low:{text:"Needs Attention",desc:"Both CSAT and QA are low \u2014 priority intervention",color:C.red},
+              neutral:{text:"Moderate",desc:"Metrics in mid-range",color:C.dim}};
+            const l=labels[al]||labels.neutral;
+            return <div style={{fontSize:10,display:"flex",alignItems:"center",gap:6}}>
+              <span style={{width:6,height:6,borderRadius:"50%",background:l.color}}/><span style={{color:l.color,fontWeight:600}}>{l.text}</span>
+              <span style={{color:C.dim}}>{"\u2014"} {l.desc}</span></div>;
+          })()}
+        </div>}
+
+        {/* Risk Factors */}
+        {risk.reasons.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+(risk.level==="HIGH"?C.red:C.amber)}}>
+          <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:6}}>Risk Factors</div>
+          {risk.reasons.map((r,i)=><div key={i} style={{fontSize:10,color:risk.level==="HIGH"?C.red:C.amber,marginTop:3,display:"flex",alignItems:"center",gap:6}}>
+            <span style={{width:4,height:4,borderRadius:"50%",background:risk.level==="HIGH"?C.red:C.amber,flexShrink:0}}/> {r}
+          </div>)}
+        </div>}
+
+        {/* CSAT Comments */}
+        {survey&&<div style={{...cs,borderLeft:"3px solid "+C.purple}}>
+          <div style={{fontSize:10,fontWeight:600,color:C.purple,marginBottom:6}}>CSAT {"\u2014"} {WEEKS[wIdx]||"Week"}</div>
+          <div style={{fontSize:9,color:C.muted,marginBottom:4}}>All-time: {survey.avgRating||"--"}{"\u2605"} ({survey.surveys} surveys)</div>
+          {weekComments.length>0?weekComments.slice(0,2).map((c,i)=><div key={i} style={{fontSize:10,color:C.text,fontStyle:"italic",padding:"6px 10px",background:C.bg,borderRadius:6,borderLeft:"2px solid "+C.purple+"66",marginBottom:4,lineHeight:1.4}}>
+            {"\u201c"}{c.substring(0,140)}{c.length>140?"...":""}{"\u201d"}
+          </div>):<div style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>No surveys this week</div>}
+        </div>}
+      </>}
+
+      {/* =================== SKILLS TAB =================== */}
+      {profileTab==="skills"&&<>
+        {/* Radar / Spider Chart */}
+        <div style={{...cs,marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:4}}>Skills Spider Chart</div>
+          <ResponsiveContainer width="100%" height={260}>
+            <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
+              <PolarGrid stroke={C.border}/>
+              <PolarAngleAxis dataKey="skill" tick={{fontSize:9,fill:C.dim}}/>
+              <PolarRadiusAxis angle={90} domain={[0,100]} tick={{fontSize:8,fill:C.muted}} axisLine={false}/>
+              <Radar name="Met %" dataKey="value" stroke={C.cyan} fill={C.cyan} fillOpacity={0.15} strokeWidth={2} dot={{r:3,fill:C.cyan}}/>
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Strengths & Opportunities cards */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+          <div style={{...cs,borderLeft:"3px solid "+C.green}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8}}>Strengths</div>
+            {strengths.map((s,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:5}}>
+              <span style={{fontSize:10}}>{s.name}</span>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:10,fontWeight:700,fontFamily:"monospace",color:C.green}}>{s.pct}%</span>
+              </div>
+            </div>)}
+          </div>
+          <div style={{...cs,borderLeft:"3px solid "+C.red}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8}}>Opportunities</div>
+            {opps.map((o,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:5}}>
+              <span style={{fontSize:10}}>{o.name}</span>
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:9,color:C.dim}}>Target {Math.min(o.pct+10,100)}%</span>
+                <DonutChart value={o.pct} total={100} color={C.red} size={20}/>
+              </div>
+            </div>)}
+          </div>
+        </div>
+
+        {/* All Behaviors Detail */}
+        <div style={{...cs}}>
+          <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:8}}>All Behaviors</div>
+          {SCS.map(c=><div key={c} style={{display:"flex",alignItems:"center",gap:8,marginTop:5}}>
+            <span style={{fontSize:9,color:C.dim,width:75,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{SC_FULL[c]}</span>
+            <div style={{flex:1,height:5,background:C.bg,borderRadius:3,overflow:"hidden"}}>
+              <div style={{width:(agent.sc[c]||0)+"%",height:"100%",borderRadius:3,
+                background:(agent.sc[c]||0)>=70?C.green:(agent.sc[c]||0)>=50?C.amber:C.red,transition:"width .4s"}}/>
+            </div>
+            <span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:30,textAlign:"right",
+              color:(agent.sc[c]||0)>=70?C.green:(agent.sc[c]||0)>=50?C.amber:C.red}}>{agent.sc[c]||0}%</span>
+          </div>)}
+        </div>
+      </>}
+
+      {/* =================== HISTORY TAB =================== */}
+      {profileTab==="history"&&<>
+        {agentInts.length>0?<div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {agentInts.slice(-8).reverse().map((int,i)=><div key={i} style={{...cs,padding:14,cursor:"pointer",transition:"all .15s"}}
+            onClick={()=>onViewInteraction([int])}
+            onMouseEnter={e=>e.currentTarget.style.borderColor=C.cyan+"44"} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
+            {/* Eval header */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:18,fontWeight:800,fontFamily:"monospace",
+                  color:int.score>=GOAL?C.green:int.score>=60?C.amber:C.red}}>{int.score}</span>
+                <div>
+                  <div style={{fontSize:10,fontWeight:600}}>{new Date(int.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div>
+                  <div style={{fontSize:9,color:C.dim}}>{int.qa} {"\u00b7"} {(int.channel||"").toUpperCase()}</div>
+                </div>
+              </div>
+              <div style={{display:"flex",gap:4}}>
+                {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId}
+                  target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}
+                  style={{fontSize:9,color:C.cyan,textDecoration:"none",padding:"3px 8px",borderRadius:4,border:"1px solid "+C.cyan+"33",background:C.cyan+"08"}}>
+                  {"\u2197"} Stella</a>}
+                {int.url&&<a href={int.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()}
+                  style={{fontSize:9,color:C.purple,textDecoration:"none",padding:"3px 8px",borderRadius:4,border:"1px solid "+C.purple+"33",background:C.purple+"08"}}>
+                  {"\u2197"} Gladly</a>}
+              </div>
+            </div>
+            {/* SC quick status */}
+            <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:6}}>
+              {SCS.map(c=>{const val=int.sc?.[c];const met=val==="Met"||val==="Exceed";const partial=val==="Met Some";
+                return <span key={c} style={{fontSize:8,padding:"2px 5px",borderRadius:3,
+                  background:met?C.green+"12":partial?C.amber+"12":C.red+"12",
+                  color:met?C.green:partial?C.amber:C.red,fontWeight:600}}>{SC_FULL[c].split(" ")[0]}</span>;})}
+            </div>
+            {/* QA Feedback as blockquote */}
+            {Object.keys(int.comments||{}).length>0&&Object.entries(int.comments).slice(0,2).map(([q,c],ci)=>
+              <div key={ci} style={{padding:"8px 12px",borderRadius:6,background:C.bg,borderLeft:"3px solid "+C.cyan+"44",marginBottom:4}}>
+                <div style={{fontSize:8,color:C.cyan,fontWeight:600,marginBottom:2}}>{q}</div>
+                <div style={{fontSize:10,color:C.text,fontStyle:"italic",lineHeight:1.5,opacity:.85}}>
+                  {"\u201c"}{c.substring(0,150)}{c.length>150?"...":""}{"\u201d"}
+                </div>
+              </div>)}
+          </div>)}
+        </div>:<EmptyState message="No evaluations found for this agent"/>}
+      </>}
+    </div>
+  </div>;
+}
+
+nction AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction}){
   if(!agent)return null;
   const risk=getRiskLevel(agent,wIdx);
   const strengths=getStrengths(agent);
@@ -1616,7 +1882,7 @@ export default function NextSkill(){
 
     {/* FOOTER */}
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
-      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.3 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
+      <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.4 {"\u00b7"} QA Coaching Platform {"\u00b7"} {D.tls.length} TLs {"\u00b7"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
 
 
