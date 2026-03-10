@@ -1265,19 +1265,19 @@ function TLView({tl,wIdx,onSelectAgent}){
   const avg=(scored.reduce((s,a)=>s+a.w[wIdx],0)/scored.length).toFixed(1);
   const wow=wowDelta(tl.agents,wIdx);
 
-  // Cálculos dinámicos para los nuevos KPIs
+  // Dynamic calculations for new KPIs
   const criticalAgents = tl.agents.filter(a=>classify(a,wIdx).cat==="Critical" || classify(a,wIdx).cat==="Stagnant");
   const convertibleAgents = tl.agents.filter(a=>classify(a,wIdx).cat==="Convertible").sort((a,b)=>(b.w[wIdx]||0)-(a.w[wIdx]||0));
   const fastestPath = convertibleAgents[0];
 
-  // Identificar los 2 cuellos de botella principales del equipo
+  // Identify top 2 bottlenecks
   const scAvgs = SCS.map(c => {
     const vals = tl.agents.map(a=>a.sc[c]).filter(v=>v!=null);
     return { code: c, val: vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0 };
   }).sort((a,b)=>a.val-b.val).slice(0,2);
 
-  // Texto dinámico para el AI Summary (Front-end simulado)
-  const aiText = `El promedio del equipo ${wow >= 0 ? 'subió '+wow : 'bajó '+Math.abs(wow)} pts. Foco prioritario en ${criticalAgents.length} agentes con puntajes críticos${scAvgs[0] ? ` en la categoría '${SC_FULL[scAvgs[0].code]}'` : ''}. Se sugiere agendar coaching táctico lo antes posible.`;
+  // Simulated AI Summary front-end text
+  const aiText = `Team average ${wow >= 0 ? 'went up by '+wow : 'dropped by '+Math.abs(wow)} pts. Priority focus on ${criticalAgents.length} agents with critical scores${scAvgs[0] ? ` in '${SC_FULL[scAvgs[0].code]}'` : ''}. Tactical coaching recommended ASAP.`;
 
   return <div>
     <HistoricalBanner wIdx={wIdx}/>
@@ -1293,7 +1293,7 @@ function TLView({tl,wIdx,onSelectAgent}){
        </div>
     </div>
 
-    {/* KPI GRID (4 Columnas) */}
+    {/* KPI GRID */}
     <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))", gap:14, marginBottom:24}}>
 
       {/* 1. Team Avg w/ Progress Bar */}
@@ -1320,7 +1320,7 @@ function TLView({tl,wIdx,onSelectAgent}){
           {criticalAgents.length}<span style={{fontSize:14, color:C.red, opacity:0.5, fontFamily:"sans-serif", marginLeft:4}}>/ {scored.length}</span>
         </div>
         <div style={{fontSize:10, color:C.red, opacity:0.8, marginTop:8, lineHeight:1.3}}>
-          Agentes estancados a más de 5pts de la meta.
+          Agents stagnated &gt;5pts below goal.
         </div>
       </div>
 
@@ -1335,7 +1335,7 @@ function TLView({tl,wIdx,onSelectAgent}){
                 <span style={{fontSize:10, background:C.cyan+"1a", color:C.cyan, padding:"2px 6px", borderRadius:4, border:"1px solid "+C.cyan+"33"}}>- {(GOAL - fastestPath.w[wIdx]).toFixed(1)} pts</span>
               </div>
             </>
-         ) : <div style={{fontSize:11, color:C.dim, marginTop:8}}>Sin agentes en rango convertible</div>}
+         ) : <div style={{fontSize:11, color:C.dim, marginTop:8}}>No agents in convertible range</div>}
       </div>
 
       {/* 4. Top Bottlenecks */}
@@ -1371,6 +1371,40 @@ function TLView({tl,wIdx,onSelectAgent}){
           .sort((x,y)=>agSort.sortFn(x[agSort.sk],y[agSort.sk]))
           .map(({a, name, score, cat, gap, risk, color},i)=>{
 
+          const isCritical = cat === "Critical" || cat === "Stagnant";
+          const isConvertible = cat === "Convertible";
+          const rowBg = isCritical ? C.red+"08" : isConvertible ? C.cyan+"08" : "transparent";
+
+          return <tr key={i} onClick={()=>onSelectAgent(a)} style={{cursor:"pointer", borderBottom:"1px solid "+C.border+"33", background: rowBg, transition:"all .15s"}}
+            onMouseEnter={e=>{e.currentTarget.style.background = isCritical ? C.red+"15" : isConvertible ? C.cyan+"15" : C.cyan+"08";}}
+            onMouseLeave={e=>{e.currentTarget.style.background = rowBg;}}>
+
+            <td style={{padding:"12px 20px", fontWeight:600, display:"flex", alignItems:"center", gap:8}}>
+              {name} 
+              {isCritical && <span style={{width:6, height:6, borderRadius:"50%", background:C.red, boxShadow:"0 0 4px "+C.red}}/>}
+              {isConvertible && fastestPath?.n === name && <span style={{width:6, height:6, borderRadius:"50%", background:C.cyan, boxShadow:"0 0 4px "+C.cyan}} title="Fastest Path"/>}
+            </td>
+            <td style={{padding:"12px 20px"}}>
+              <span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background:color+"15", color:color, fontWeight:700, textTransform:"uppercase", border:"1px solid "+color+"33", letterSpacing:0.5}}>{cat}</span>
+            </td>
+            <td style={{padding:"12px 20px"}}><RiskBadge level={risk}/></td>
+            <td style={{padding:"12px 20px", fontWeight:800, fontFamily:"'Geist Mono',monospace", color:color, fontSize:13}}>{score||"--"}</td>
+            <td style={{padding:"12px 20px", fontFamily:"'Geist Mono',monospace", fontSize:11, color:C.dim}}>
+              {gap !== null ? (gap > 0 ? <span style={{color:C.dim}}>-{gap} pts</span> : <span style={{color:C.green}}>--</span>) : "--"}
+            </td>
+            <td style={{padding:"12px 20px", textAlign:"right"}}>
+              <button onClick={(e)=>{e.stopPropagation(); onSelectAgent(a);}}
+                style={{fontSize:10, fontWeight:700, padding:"6px 14px", borderRadius:6, background:C.cyan+"10", color:C.cyan, border:"1px solid "+C.cyan+"33", cursor:"pointer", textTransform:"uppercase", transition:"all 0.2s"}}
+                onMouseEnter={e=>{e.currentTarget.style.background=C.cyan; e.currentTarget.style.color="#fff";}}
+                onMouseLeave={e=>{e.currentTarget.style.background=C.cyan+"10"; e.currentTarget.style.color=C.cyan;}}>
+                Coach
+              </button>
+            </td>
+          </tr>;})}</tbody>
+      </table>
+    </div>
+  </div>;
+}
           // Lógica de tintado sutil de filas por categoría
           const isCritical = cat === "Critical" || cat === "Stagnant";
           const isConvertible = cat === "Convertible";
