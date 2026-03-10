@@ -20,11 +20,27 @@ const SC_MAP={"Warm Welcome & Respect":"WW","Thoughtful Listening":"TL","Underst
   "Ownership & Follow-Through":"OW","Sales as Service":"SS","Apologies & Gratitude":"AP",
   "Professionalism & Positive Intent":"PR","Living Our Values":"LV"};
 
+// =================================================================
+// DYNAMIC WEEK MODE: QA Week (Wed-Tue) vs Billing Week (Mon-Sun)
+// =================================================================
+window.CURRENT_WEEK_MODE = "billing";
+
 function getWeekStart(dateStr){
-  const d=new Date(dateStr);
-  const day=d.getUTCDay();
-  const diff=d.getUTCDate()-day+(day===0?-6:1);
-  return new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),diff)).toISOString().substring(0,10);
+  const mode = window.CURRENT_WEEK_MODE || "billing";
+  const d = new Date(dateStr);
+  const day = d.getUTCDay(); 
+  let diff;
+  
+  if (mode === "qa") {
+    // QA Week: Wednesday to Tuesday
+    const offset = day >= 3 ? day - 3 : day + 4;
+    diff = d.getUTCDate() - offset;
+  } else {
+    // Billing Week: Monday to Sunday
+    diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+  }
+  
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff)).toISOString().substring(0,10);
 }
 
 function processFiles(csvText,rosterTabs){
@@ -45,7 +61,7 @@ function processFiles(csvText,rosterTabs){
     });
   }
 
-  // 2. Build agent -> supervisor email mapping from roster tabs
+  // 2. Build agent -> supervisor email mapping
   const agentSup={};
   [rosterTabs.ccMexico,rosterTabs.ccJamaica,rosterTabs.act].forEach(tabCsv=>{
     if(!tabCsv)return;
@@ -56,15 +72,15 @@ function processFiles(csvText,rosterTabs){
     });
   });
 
-  // 4. Filter CSV: Customer First Scorecard + contractor emails only
+  // 3. Filter CSV
   const cfs=csv.data.filter(r=>
     r["Scorecard Name"]==="Customer First Scorecard"&&
     (r["Email"]||"").includes("contractor.")
   );
 
-  if(!cfs.length) return{error:"No contractor evaluations found in CSV. Make sure the file contains 'Customer First Scorecard' rows with contractor emails."};
+  if(!cfs.length) return{error:"No contractor evaluations found in CSV."};
 
-  // 5. Group into interactions
+  // 4. Group into interactions
   const interactions={};
   cfs.forEach(r=>{
     const iid=r["Interaction ID"];
@@ -86,7 +102,7 @@ function processFiles(csvText,rosterTabs){
     if(cmt&&q) interactions[iid].comments[q]=cmt;
   });
 
-  // 6. Week bucketing
+  // 5. Week bucketing
   const weekSet=new Set();
   Object.values(interactions).forEach(i=>weekSet.add(getWeekStart(i.date)));
   const weeks=[...weekSet].sort();
@@ -95,7 +111,7 @@ function processFiles(csvText,rosterTabs){
     return d.toLocaleDateString("en-US",{month:"short",day:"numeric",timeZone:"UTC"});
   });
 
-  // 7. Group by agent
+  // 6. Group by agent
   const agentData={};
   Object.values(interactions).forEach(int=>{
     if(!agentData[int.email]){
@@ -105,7 +121,7 @@ function processFiles(csvText,rosterTabs){
     agentData[int.email].channels.push(int.channel);
   });
 
-  // 8. Build agent objects and group by TL
+  // 7. Build agent objects and group by TL
   const tlGroups={};
   Object.values(agentData).forEach(ad=>{
     const w=weeks.map(wk=>{
@@ -138,7 +154,7 @@ function processFiles(csvText,rosterTabs){
     tlGroups[tlKey].agents.push({n:ad.name,w,sc,pr,nt,ch});
   });
 
-  // 9. QA analyst stats
+  // 8. QA analyst stats
   const qaData={};
   Object.values(interactions).forEach(int=>{
     if(!qaData[int.qa]) qaData[int.qa]={name:int.qa,scores:[],weeklyScores:{}};
@@ -207,7 +223,6 @@ function processSurveys(csvText){
   Object.values(agents).forEach(a=>{
     a.avgRating=a.ratings.length?+(a.ratings.reduce((s,v)=>s+v,0)/a.ratings.length).toFixed(1):null;
   });
-  // Build conversation ID → survey map for URL correlation
   const byConvId={};
   Object.values(agents).forEach(a=>a.entries.forEach(e=>{
     if(e.convId)byConvId[e.convId]={agent:a.name,rating:e.rating,comment:e.comment,date:e.date};
@@ -232,7 +247,6 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
   if(!surveyData?.byConvId||!Object.keys(surveyData.byConvId).length)
     return{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0};
 
-  // URL-based matching: QA interaction ↔ Survey response
   const pairs=[];
   const agentPairs={};
   (rawInts||[]).forEach(int=>{
@@ -246,11 +260,9 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
     }
   });
 
-  // Overall Pearson correlation
   const qScores=pairs.map(p=>p.qaScore), cScores=pairs.map(p=>p.csatRating*20);
   const pearson=pearsonCorrelation(qScores,cScores);
 
-  // Per-category impact on CSAT
   const categoryImpact=SCS.map(c=>{
     const valid=pairs.filter(p=>p.scBreakdown?.[c]);
     const xs=valid.map(p=>p.scBreakdown[c]==="Met"||p.scBreakdown[c]==="Exceed"?1:0);
@@ -258,7 +270,6 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
     return{code:c,name:SC_FULL[c],correlation:pearsonCorrelation(xs,ys),n:valid.length};
   }).filter(c=>c.correlation!=null).sort((a,b)=>Math.abs(b.correlation)-Math.abs(a.correlation));
 
-  // Agent-level aggregation
   const agentMap={};
   Object.entries(agentPairs).forEach(([name,ps])=>{
     const avgQA=+(ps.reduce((s,p)=>s+p.qaScore,0)/ps.length).toFixed(1);
@@ -267,7 +278,6 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
       alignment:avgCSAT>=4&&avgQA>=GOAL?"aligned":avgCSAT>=4&&avgQA<GOAL?"csat_leads":avgCSAT<3&&avgQA>=GOAL?"qa_leads":avgCSAT<3&&avgQA<60?"both_low":"neutral"};
   });
 
-  // Generate findings
   const findings=[];
   Object.entries(agentMap).forEach(([name,d])=>{
     if(d.csatRating>=4&&d.qaScore<GOAL)
@@ -281,7 +291,6 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
         msg:"CSAT "+d.csatRating+"★ and QA "+d.qaScore+" — urgent intervention needed"});
   });
 
-  // Top insight from category impact
   if(categoryImpact.length>=2){
     const top=categoryImpact[0];
     findings.unshift({agent:"Campaign",type:"impact_insight",severity:"insight",
@@ -486,9 +495,8 @@ async function fetchFromSheets(qaSheetId,rosterSheetId,surveySheetId){
       if(sResp.ok)surveyData=processSurveys(await sResp.text());
     }catch(e){console.warn("Survey fetch failed:",e);}
   }
-  return{...result,surveyData};
+  return{...result,surveyData, raw: {qaText, rosterTabs}};
 }
-
 
 // =================================================================
 // SHARED UI COMPONENTS
@@ -1257,7 +1265,7 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
 }
 
 // =================================================================
-// REEMPLAZA TU FUNCIÓN TLView ACTUAL CON ESTA VERSIÓN 100% EN INGLÉS
+// TEAM LEAD VIEW
 // =================================================================
 function TLView({tl,wIdx,onSelectAgent}){
   const agSort=useSort("score");
@@ -1666,7 +1674,6 @@ function SetupScreen({onDataReady,savedConfig}){
   const handleConnect=async(qId,rId,sId)=>{
     const q=extractId(qId||qaId),r=extractId(rId||rosterId),s=extractId(sId||surveyId);
     if(!q||!r){setError("QA and Roster Sheet IDs required.");return;}
-    // Added eslint-disable to bypass unsused variables if needed, otherwise ignore.
     setLoading(true);setError(null);
     try{const result=await fetchFromSheets(q,r,s);
       if(result.error){setError(result.error);setLoading(false);return;}
@@ -1708,6 +1715,10 @@ export default function NextSkill(){
     const h=window.location.hash.substring(1);const params=new URLSearchParams(h);
     return{qaId:params.get("qa")||DEFAULT_QA_SHEET,rosterId:params.get("roster")||DEFAULT_ROSTER_SHEET,
       surveyId:params.get("survey")||DEFAULT_SURVEY_SHEET};});
+  
+  // DYNAMIC WEEK MODE STATE
+  const [weekMode, setWeekMode] = useState("billing");
+
   const[wIdx,setWIdx]=useState(0);
   const[site,setSite]=useState("all");
   const[selTL,setSelTL]=useState(null);
@@ -1725,11 +1736,36 @@ export default function NextSkill(){
   const intervalRef=React.useRef(null);
   const initialLoad=React.useRef(false);
 
+  // FUNCTION TO TOGGLE BETWEEN BILLING AND QA WEEKS
+  const toggleWeekMode = (mode) => {
+    if (mode === weekMode || !D?.raw) return;
+    window.CURRENT_WEEK_MODE = mode;
+    setWeekMode(mode);
+    setRefreshing(true); 
+    
+    // Recalculate with a micro-delay to not freeze UI immediately
+    setTimeout(() => {
+      try {
+        const newResult = processFiles(D.raw.qaText, D.raw.rosterTabs);
+        newResult.surveyData = D.surveyData;
+        newResult.raw = D.raw; // Preserve raw data for future toggles
+        
+        D = newResult;
+        WEEKS = newResult.weeks;
+        LATEST_WIDX = WEEKS.length - 1;
+        setData(newResult);
+        setWIdx(LATEST_WIDX); 
+      } catch(e) { console.error("Error recalcular semanas:", e); }
+      setRefreshing(false);
+    }, 50);
+  };
+
   if(data&&data!==D){D=data;WEEKS=D.weeks;LATEST_WIDX=WEEKS.length-1;}
 
   const filteredTLs=useMemo(()=>!D?[]:site==="all"?D.tls:D.tls.filter(t=>t.site===site),[site,data]);
   const alerts=useMemo(()=>!D?[]:generateAlerts(D.tls,wIdx),[data,wIdx]);
   const csatData=useMemo(()=>!D?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(D.tls,D.surveyData,D.rawInts),[data]);
+  
   const handleRefresh=useCallback(async()=>{
     if(!config||refreshing)return;setRefreshing(true);
     try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
@@ -1752,7 +1788,6 @@ export default function NextSkill(){
       if(!r.error){D=r;WEEKS=r.weeks;LATEST_WIDX=WEEKS.length-1;setData(r);setLastUpdated(new Date());}}catch(e){}},REFRESH_INTERVAL);
     return()=>clearInterval(intervalRef.current);},[config]);
 
-  
   // Browser back button navigation
   React.useEffect(()=>{
     const onPop=()=>{
@@ -1785,6 +1820,19 @@ export default function NextSkill(){
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          
+          {/* TOGGLE DE BILLING / QA WEEK */}
+          <div style={{display:"flex", background:C.bg, borderRadius:20, padding:3, border:"1px solid "+C.border, marginRight:4}}>
+            <button onClick={()=>toggleWeekMode("billing")} 
+              style={{fontSize:9, padding:"5px 12px", borderRadius:16, border:"none", background:weekMode==="billing"?C.cyan+"22":"transparent", color:weekMode==="billing"?C.cyan:C.dim, cursor:"pointer", fontWeight:600, transition:"all .2s"}}>
+              Billing Wk
+            </button>
+            <button onClick={()=>toggleWeekMode("qa")} 
+              style={{fontSize:9, padding:"5px 12px", borderRadius:16, border:"none", background:weekMode==="qa"?C.purple+"22":"transparent", color:weekMode==="qa"?C.purple:C.dim, cursor:"pointer", fontWeight:600, transition:"all .2s"}}>
+              QA Wk
+            </button>
+          </div>
+
           <select value={wIdx} onChange={e=>setWIdx(+e.target.value)} style={{...sel,borderColor:wIdx<LATEST_WIDX?C.amber+"66":C.border}}>
             {WEEKS.map((w,i)=><option key={i} value={i}>{w}{i===LATEST_WIDX?" (current)":""}</option>)}</select>
           <select value={site} onChange={e=>{setSite(e.target.value);setSelTL(null);setSelAgent(null);}} style={sel}>
@@ -1843,7 +1891,7 @@ export default function NextSkill(){
     {/* CONTENT */}
     <div style={{display:"flex",gap:0}}>
     <div style={{flex:1,padding:"16px 28px 40px",minWidth:0}}>
-      {tab==="dashboard"&&(selAgent?<AgentView agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx} csatData={csatData}/>:
+      {tab==="dashboard"&&(selAgent?<AgentView agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx}/>:
         selTL?<TLView tl={selTL} wIdx={wIdx} onSelectAgent={a=>onSelectAgent(a,selTL)}/>:
         <CampaignView wIdx={wIdx} onSelectTL={onSelectTL} onSelectAgent={onSelectAgent} catFilter={catFilter} setCatFilter={setCatFilter} csatFindings={csatData.findings} site={site} filteredTLs={filteredTLs}/>)}
       {tab==="coaching"&&<CoachingTab alerts={alerts} wIdx={wIdx} onSelectAgent={onSelectAgent} tls={D.tls}/>}
