@@ -13,7 +13,10 @@ const DEFAULT_QA_SHEET="1tH-SwH7OAdMSU-odErm6h8TF2kxCJN1veJ9fhmCzEJU";
 // LINK AL NUEVO ROSTER ACTUALIZADO:
 const DEFAULT_ROSTER_SHEET="1LExOVMrZ17wJtbHM1jrGilsZchwP6l4q6Mpa_9DG1g0";
 const DEFAULT_SURVEY_SHEET="1KUpnp3oFTLfw0Y9m5qsCaBklYcQYL6L7wE2lTqIZ530";
-const ROSTER_TABS=["Leadership","CC MEXICO","CC JAMAICA","ADVANCE CARE TEAM"];
+
+// NOMBRES EXACTOS DE LAS PESTAÑAS (TABS) EN TU NUEVO GOOGLE SHEET
+const ROSTER_TABS=["Leadership","CC MEXICO","CC JAMAICA","ADV CARE"];
+
 const REFRESH_INTERVAL=12*60*60*1000;
 
 const SC_MAP={"Warm Welcome & Respect":"WW","Thoughtful Listening":"TL","Understanding & Removing Barriers":"RB",
@@ -769,7 +772,7 @@ function InteractionModal({interactions,onClose}){
 }
 
 // =================================================================
-// AGENT PROFILE PANEL
+// AGENT PROFILE PANEL (With Mobile Responsive Layout)
 // =================================================================
 function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction,isMobile}){
   if(!agent)return null;
