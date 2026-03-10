@@ -40,18 +40,15 @@ function getWeekStart(dateStr){
   const d = safeDate(dateStr); 
   
   if (mode === "mtd") {
-    // Return the 1st of the month to group everything by month
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString().substring(0,10);
   }
 
   const day = d.getUTCDay(); 
   let diff;
   if (mode === "qa") {
-    // QA Week: Wednesday to Tuesday
     const offset = day >= 3 ? day - 3 : day + 4;
     diff = d.getUTCDate() - offset;
   } else {
-    // Billing Week: Monday to Sunday
     diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
   }
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff)).toISOString().substring(0,10);
@@ -592,7 +589,6 @@ function useSort(defaultKey,defaultDir="desc"){
   return{sk,sd,toggle,sortFn};
 }
 
-
 function DonutChart({value,total,color,size=64}){
   const pct=total?value/total:0;
   const r=(size-6)/2;
@@ -812,7 +808,6 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
     color:profileTab===t?C.cyan:C.dim,borderBottom:profileTab===t?"2px solid "+C.cyan:"2px solid transparent",
     background:"none",border:"none",transition:"all .15s"});
 
-  // FUNCIÓN PARA EXPORTAR EL PERFIL A PDF MEDIANTE IMPRESIÓN LIMPIA
   const handlePrintPDF = () => {
     const style = document.createElement('style');
     style.innerHTML = `@media print { 
@@ -1400,6 +1395,257 @@ function TLView({tl,wIdx,onSelectAgent, isMobile}){
   </div>;
 }
 
+function AgentView({agent,tl,wIdx}){
+  if(!agent)return null;
+  const v=agent.w[wIdx],cat=classify(agent,wIdx);
+  if(v==null)return <EmptyState message={"No evaluations for "+agent.n+" in week "+WEEKS[wIdx]}/>;
+  const tr=getAgentTrend(agent,wIdx);
+  const cards=genFocusCards("agent",agent,wIdx);
+  const trendData=agent.w.map((val,i)=>val!=null?{wk:WEEKS[i],score:val}:null).filter(Boolean);
+  const scData=SCS.map(c=>({name:SC_FULL[c],val:agent.sc[c]||0}));
+  return <div>
+    <HistoricalBanner wIdx={wIdx}/>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={v} label="Current Score" color={cat.color} delta={tr}/>
+      <KpiCard value={agent.pr+"%"} label="Procedures" color={agent.pr>=70?C.green:C.red}/>
+      <KpiCard value={agent.nt+"%"} label="Notes" color={agent.nt>=70?C.green:C.red}/>
+    </div>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>{cards.map((c,i)=><FocusCard key={i} card={c}/>)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))",gap:12}}>
+      <div style={{...cs}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Score Trend</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <LineChart data={trendData}>
+            <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/>
+            <XAxis dataKey="wk" tick={{fontSize:9,fill:C.muted}} axisLine={false}/>
+            <YAxis domain={[0,100]} tick={{fontSize:9,fill:C.muted}} axisLine={false} width={28}/>
+            <Tooltip content={<Tp/>}/>
+            <ReferenceLine y={GOAL} stroke={C.green+"66"} strokeDasharray="4 4"/>
+            <Line type="monotone" dataKey="score" name="Score" stroke={C.cyan} strokeWidth={2} dot={{r:4,fill:C.cyan}}/>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div style={{...cs}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Service Commitments</div>
+        {scData.map((d,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}>
+          <span style={{fontSize:9,color:C.dim,width:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.name}</span>
+          <div style={{flex:1,height:6,background:C.bg,borderRadius:3,overflow:"hidden"}}>
+            <div style={{width:d.val+"%",height:"100%",borderRadius:3,background:d.val>=70?C.green:d.val>=50?C.amber:C.red}}/></div>
+          <span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:28,textAlign:"right",color:d.val>=70?C.green:d.val>=50?C.amber:C.red}}>{d.val}%</span>
+        </div>)}
+      </div>
+    </div>
+  </div>;
+}
+
+// =================================================================
+// TABS: COACHING, QA ANALYTICS, SURVEYS
+// =================================================================
+function CoachingTab({alerts,wIdx,onSelectAgent,tls}){
+  const high=alerts.filter(a=>a.severity==="high"),med=alerts.filter(a=>a.severity==="medium");
+  return <div>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={alerts.length} label="Total Alerts" color={C.red} icon={"⚠"}/>
+      <KpiCard value={high.length} label="High Severity" color={C.red}/>
+      <KpiCard value={med.length} label="Medium" color={C.amber}/>
+    </div>
+    {high.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.red}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:8}}>{"⚠"} High Priority</div>
+      {high.map((a,i)=><div key={i} style={{padding:"8px 0",borderBottom:i<high.length-1?"1px solid "+C.border+"22":undefined,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><span style={{fontSize:12,fontWeight:600,cursor:"pointer"}} onClick={()=>{const t=tls.find(t=>t.name===a.tl);const ag=t?.agents.find(x=>x.n===a.agent);if(ag&&t)onSelectAgent(ag,t);}}>{a.agent}</span>
+          <span style={{fontSize:10,color:C.dim,marginLeft:8}}>{a.tl}</span></div>
+        <span style={{fontSize:10,color:C.red}}>{a.msg}</span></div>)}</div>}
+    {med.length>0&&<div style={{...cs,borderLeft:"3px solid "+C.amber}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.amber,marginBottom:8}}>{"⚠"} Monitor</div>
+      {med.map((a,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<med.length-1?"1px solid "+C.border+"22":undefined,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><span style={{fontSize:11,fontWeight:600,cursor:"pointer"}} onClick={()=>{const t=tls.find(t=>t.name===a.tl);const ag=t?.agents.find(x=>x.n===a.agent);if(ag&&t)onSelectAgent(ag,t);}}>{a.agent}</span>
+          <span style={{fontSize:10,color:C.dim,marginLeft:8}}>{a.tl}</span></div>
+        <span style={{fontSize:10,color:C.amber}}>{a.msg}</span></div>)}</div>}
+    {!alerts.length&&<EmptyState message="No coaching alerts this week."/>}
+  </div>;
+}
+
+function QAAnalyticsTab({wIdx}){
+  const qaSort=useSort("n");
+  const qaData=D.qas||[];
+  return <div>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={qaData.length} label="QA Analysts" color={C.purple}/>
+      <KpiCard value={qaData.reduce((s,q)=>s+q.n,0)} label="Total Evaluations" color={C.blue}/>
+      <KpiCard value={qaData.length?(qaData.reduce((s,q)=>s+q.avg,0)/qaData.length).toFixed(1):"--"} label="Avg Score Given" color={C.cyan}/>
+    </div>
+    <div style={{...cs,marginBottom:12}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Calibration Overview</div>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={[...qaData].sort((a,b)=>a.avg-b.avg)} layout="vertical">
+          <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/>
+          <XAxis type="number" domain={[40,90]} tick={{fontSize:9,fill:C.muted}} axisLine={false}/>
+          <YAxis dataKey="name" type="category" tick={{fontSize:9,fill:C.muted}} width={120} axisLine={false}/>
+          <Tooltip content={<Tp/>}/>
+          <ReferenceLine x={GOAL} stroke={C.green+"66"} strokeDasharray="4 4"/>
+          <Bar dataKey="avg" name="Avg Score" radius={[0,4,4,0]}>
+            {[...qaData].sort((a,b)=>a.avg-b.avg).map((q,i)=><Cell key={i} fill={q.avg>=GOAL?C.green:q.avg>=60?C.amber:C.red}/>)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+    <div style={{...cs, overflowX: "auto"}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Reviewer Details</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "400px"}}>
+        <SortHeader columns={[["name","QA Analyst"],["n","Evals",60],["avg","Avg Score",70],["sd","Std Dev",60],["vol","Volatility",70]]}
+            sortKey={qaSort.sk} sortDir={qaSort.sd} onSort={qaSort.toggle}/>
+        <tbody>{[...qaData].sort((a,b)=>qaSort.sortFn(a[qaSort.sk],b[qaSort.sk])).map((q,i)=>
+          <tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
+            <td style={{padding:"8px 10px",fontWeight:600}}>{q.name}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{q.n}</td>
+            <td style={{padding:"8px 10px",fontWeight:700,fontFamily:"monospace",color:q.avg>=GOAL?C.green:C.amber}}>{q.avg}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace",color:q.sd>12?C.red:C.dim}}>{q.sd}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace",color:q.vol>2?C.red:C.dim}}>{q.vol}</td>
+          </tr>)}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
+  const[csatFilter,setCsatFilter]=useState("all");
+  const intelSort=useSort("avgRating","asc");
+  const agents=Object.values(surveyData?.agents||{}).filter(a=>a.ratings.length>0);
+  const filteredAgents=csatFilter==="all"?agents:
+    csatFilter==="low"?agents.filter(a=>a.avgRating<3):
+    csatFilter==="high"?agents.filter(a=>a.avgRating>=4):agents;
+
+  return <div>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={csatData.matched} label="Matched Interactions" color={C.teal} icon={"🔗"}/>
+      <KpiCard value={csatData.pearson!=null?csatData.pearson:"--"} label="QA-CSAT Correlation" color={csatData.pearson>0.3?C.green:C.amber} icon={"📊"}/>
+      <KpiCard value={surveyData?.total||0} label="Total Surveys" color={C.purple} icon={"📩"}/>
+      <KpiCard value={surveyData?.avgRating||"--"} label="Avg Rating" color={C.purple} icon={"★"}/>
+      <KpiCard value={(surveyData?.responseRate||0)+"%"} label="Response Rate" color={C.teal}/>
+    </div>
+
+    {csatData.categoryImpact.length>0&&<div style={{...cs,marginBottom:12}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>QA Impact on CSAT — Which behaviors drive customer satisfaction?</div>
+      {csatData.categoryImpact.map((c,i)=>{
+        const w=Math.max(5,Math.abs(c.correlation)*100);
+        const clr=c.correlation>0.3?C.green:c.correlation>0.1?C.teal:C.dim;
+        return <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+          <span style={{fontSize:10,color:C.dim,width:100,textAlign:"right"}}>{c.name}</span>
+          <div style={{flex:1,height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}>
+            <div style={{width:w+"%",height:"100%",borderRadius:4,background:clr,transition:"width .3s"}}/>
+          </div>
+          <span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:clr,width:40}}>{c.correlation}</span>
+          <span style={{fontSize:9,color:C.dim}}>n={c.n}</span>
+        </div>;})}
+    </div>}
+
+    {csatData.findings.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.purple}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.purple,marginBottom:8}}>{"📊"} QA-CSAT Insights</div>
+      {csatData.findings.slice(0,8).map((f,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<Math.min(csatData.findings.length,8)-1?"1px solid "+C.border+"22":undefined,
+        display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div><span style={{fontSize:11,fontWeight:600,cursor:f.agent!=="Campaign"?"pointer":"default"}}
+          onClick={()=>{if(f.agent!=="Campaign"){const t=tls.find(t=>t.agents.some(a=>a.n===f.agent));const a=t?.agents.find(x=>x.n===f.agent);if(a&&t)onSelectAgent(a,t);}}}>{f.agent}</span></div>
+        <span style={{fontSize:10,color:f.severity==="critical"?C.red:f.severity==="warning"?C.amber:C.teal}}>{f.msg}</span>
+      </div>)}
+    </div>}
+
+    <div style={{display:"flex",gap:8,marginBottom:12}}>
+      {[["all","All"],["low","CSAT ≤ 3"],["high","CSAT ≥ 4"]].map(([val,label])=>
+        <button key={val} onClick={()=>setCsatFilter(val)}
+          style={{fontSize:10,padding:"4px 12px",borderRadius:4,cursor:"pointer",border:"1px solid "+(csatFilter===val?C.purple:C.border),
+            background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
+    </div>
+
+    <div style={{...cs, overflowX: "auto"}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "600px"}}>
+        <SortHeader columns={[["name","Agent"],["surveys","Surveys",60],["avgRating","Avg Rating",70],["qaScore","QA Score",70],["alignment","Status",80],["comment","Comment"],["actions","",50]]}
+            sortKey={intelSort.sk} sortDir={intelSort.sd} onSort={intelSort.toggle}/>
+        <tbody>{filteredAgents.map(a=>{const qm=csatData.agentMap[a.name];return{...a,qaScore:qm?.qaScore||0,alignment:qm?.alignment||"neutral",comment:a.comments.length?a.comments[a.comments.length-1]:""}; })
+          .sort((a,b)=>intelSort.sortFn(a[intelSort.sk],b[intelSort.sk])).map((a,i)=>{
+          return <tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
+            <td style={{padding:"8px 10px",fontWeight:600}}>{a.name}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace"}}>{a.surveys}</td>
+            <td style={{padding:"8px 10px"}}><span style={{fontWeight:700,fontFamily:"monospace",color:(a.avgRating||0)>=4?C.green:(a.avgRating||0)>=3?C.amber:C.red}}>{a.avgRating||"--"}</span> {"★"}</td>
+            <td style={{padding:"8px 10px",fontFamily:"monospace",color:C.dim}}>{a.qaScore||"--"}</td>
+            <td style={{padding:"8px 10px"}}>{(()=>{const colors={aligned:C.green,csat_leads:C.amber,qa_leads:C.amber,both_low:C.red,neutral:C.dim};
+              const labels={aligned:"Aligned",csat_leads:"CSAT Leads",qa_leads:"QA Leads",both_low:"Low",neutral:"—"};
+              return <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:(colors[a.alignment]||C.dim)+"18",color:colors[a.alignment]||C.dim}}>{labels[a.alignment]||"—"}</span>;})()}</td>
+            <td style={{padding:"8px 10px",fontSize:10,color:C.dim,maxWidth:180,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.comments.length?a.comments[a.comments.length-1].substring(0,60):"--"}</td>
+            <td style={{padding:"8px 10px"}}>{a.entries?.[0]?.url&&<a href={a.entries[a.entries.length-1].url} target="_blank" rel="noopener noreferrer"
+              style={{fontSize:9,color:C.purple,textDecoration:"none"}}>{"↗"} Gladly</a>}</td>
+          </tr>;})}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+// =================================================================
+// LOADING & SETUP SCREENS
+// =================================================================
+function LoadingScreen({error,onSetup}){
+  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",
+    display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+    <div style={{textAlign:"center"}}>
+      <div style={{marginBottom:20}}><svg width="48" height="48" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg></div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-0.5px",marginBottom:16}}>Next<span style={{color:"#06b6d4"}}>Skill</span></div>
+      {error?<><p style={{fontSize:12,color:C.red,margin:"0 0 16px",maxWidth:400}}>{error}</p>
+        <button onClick={onSetup} style={{padding:"8px 20px",borderRadius:6,border:"1px solid "+C.cyan,background:"transparent",color:C.cyan,fontSize:11,cursor:"pointer"}}>Configure</button>
+      </>:<div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
+        <div style={{width:6,height:6,borderRadius:"50%",background:C.cyan,animation:"pulse 1.5s infinite"}}/>
+        <span style={{fontSize:11,color:C.dim,fontFamily:"monospace"}}>Initializing platform...</span>
+      </div>}
+    </div>
+    <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
+  </div>;
+}
+
+function SetupScreen({onDataReady,savedConfig}){
+  const[qaId,setQaId]=useState(savedConfig?.qaId||"");
+  const[rosterId,setRosterId]=useState(savedConfig?.rosterId||"");
+  const[surveyId,setSurveyId]=useState(savedConfig?.surveyId||"");
+  const[loading,setLoading]=useState(false);
+  const[error,setError]=useState(null);
+  const autoFetched=React.useRef(false);
+  React.useEffect(()=>{
+    if(savedConfig?.qaId&&savedConfig?.rosterId&&!autoFetched.current){
+      autoFetched.current=true;handleConnect(savedConfig.qaId,savedConfig.rosterId,savedConfig.surveyId);}
+  },[]);
+  const extractId=(input)=>{if(!input)return"";const s=input.trim();const m=s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);return m?m[1]:s;};
+  const handleConnect=async(qId,rId,sId)=>{
+    const q=extractId(qId||qaId),r=extractId(rId||rosterId),s=extractId(sId||surveyId);
+    if(!q||!r){setError("QA and Roster Sheet IDs required.");return;}
+    setLoading(true);setError(null);
+    try{const result=await fetchFromSheets(q,r,s);
+      if(result.error){setError(result.error);setLoading(false);return;}
+      window.location.hash="qa="+q+"&roster="+r+"&survey="+s;
+      onDataReady(result,{qaId:q,rosterId:r,surveyId:s});
+    }catch(err){setError(err.message);setLoading(false);}
+  };
+  const inp={width:"100%",padding:"10px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,fontSize:12,fontFamily:"monospace",outline:"none",boxSizing:"border-box"};
+  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40}}>
+    <div style={{maxWidth:500,width:"100%"}}>
+      <div style={{textAlign:"center",marginBottom:32}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><svg width="40" height="40" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg><span style={{fontSize:22,fontWeight:800,letterSpacing:"-0.5px"}}>Next<span style={{color:"#06b6d4"}}>Skill</span></span></div>
+        <p style={{fontSize:11,color:C.dim,margin:0}}>Configure your data sources</p>
+      </div>
+      <div style={{marginBottom:12}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>QA REVIEWS SHEET *</label>
+        <input value={qaId} onChange={e=>setQaId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
+      <div style={{marginBottom:12}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>ROSTER SHEET *</label>
+        <input value={rosterId} onChange={e=>setRosterId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
+      <div style={{marginBottom:20}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>SURVEY SHEET (optional)</label>
+        <input value={surveyId} onChange={e=>setSurveyId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
+      {error&&<div style={{background:C.red+"12",border:"1px solid "+C.red+"30",borderRadius:8,padding:"10px 14px",marginBottom:16}}>
+        <span style={{fontSize:11,color:C.red}}>{error}</span></div>}
+      <button onClick={()=>handleConnect()} disabled={!qaId||!rosterId||loading}
+        style={{width:"100%",padding:"14px 0",borderRadius:8,border:"none",
+          background:qaId&&rosterId&&!loading?"linear-gradient(135deg,"+C.cyan+","+C.blue+")":C.muted,
+          color:qaId&&rosterId?C.text:C.text+"66",fontSize:13,fontWeight:700,cursor:qaId&&rosterId&&!loading?"pointer":"not-allowed",
+          letterSpacing:"1px",textTransform:"uppercase"}}>
+        {loading?"Connecting...":"Connect & Launch"}</button>
+    </div>
+  </div>;
+}
+
 // =================================================================
 // MAIN APPLICATION
 // =================================================================
@@ -1459,11 +1705,11 @@ export default function NextSkill(){
     }, 50);
   };
 
-  // NUEVA FUNCIÓN: Cambio de tab inteligente
+  // NUEVA FUNCIÓN: Cierre automático de menú lateral al cambiar de tab
   const changeTab = (newTab) => {
     setTab(newTab);
     if (newTab !== "dashboard") {
-      setShowProfile(false); // Cierra el perfil automáticamente si cambias de pestaña
+      setShowProfile(false); 
     }
   };
 
@@ -1477,7 +1723,6 @@ export default function NextSkill(){
     if(!config||refreshing)return;setRefreshing(true);
     try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
       if(!result.error){
-        // Guardar en caché al refrescar manualmente
         localStorage.setItem('nextskill_cache', JSON.stringify({
           raw: result.raw, surveyData: result.surveyData, timestamp: new Date().getTime()
         }));
@@ -1489,30 +1734,29 @@ export default function NextSkill(){
   React.useEffect(()=>{
     if(initialLoad.current||!config)return;initialLoad.current=true;
     
-    // CARGA INSTANTÁNEA DESDE CACHÉ
     const cached = localStorage.getItem('nextskill_cache');
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
+        if (!parsed.raw || !parsed.raw.qaText) throw new Error("Invalid cache format");
         const result = processFiles(parsed.raw.qaText, parsed.raw.rosterTabs);
         result.surveyData = parsed.surveyData;
         result.raw = parsed.raw;
         D = result; WEEKS = result.weeks; LATEST_WIDX = WEEKS.length - 1;
         setData(result); setWIdx(LATEST_WIDX);
         setLastUpdated(new Date(parsed.timestamp));
-      } catch(e) { console.warn("Cache parse error", e); }
+      } catch(e) { 
+        console.warn("Cache parse error", e); 
+        localStorage.removeItem('nextskill_cache'); 
+      }
     }
 
-    // CARGA EN SEGUNDO PLANO
     setRefreshing(!cached);
     (async()=>{try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
       if(result.error){ if(!cached) setLoadError(result.error); return;}
-      
-      // Guardar en caché
       localStorage.setItem('nextskill_cache', JSON.stringify({
          raw: result.raw, surveyData: result.surveyData, timestamp: new Date().getTime()
       }));
-
       D=result;WEEKS=result.weeks;LATEST_WIDX=WEEKS.length-1;
       setData(result);setWIdx(result.weeks.length-1);setLastUpdated(new Date());
     }catch(e){ if(!cached) setLoadError(e.message); }
@@ -1558,7 +1802,6 @@ export default function NextSkill(){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:16}}>
           
-          {/* NUEVO COMPORTAMIENTO: LOGO COMO BOTÓN DE HOME */}
           <div style={{display:"flex",alignItems:"center",gap:8, cursor:"pointer"}} 
             onClick={()=>{setSelTL(null);setSelAgent(null);setShowProfile(false);setTab("dashboard");navPush({tab:"dashboard"});}}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg>
