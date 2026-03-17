@@ -20,9 +20,6 @@ const SC_MAP={"Warm Welcome & Respect":"WW","Thoughtful Listening":"TL","Underst
   "Ownership & Follow-Through":"OW","Sales as Service":"SS","Apologies & Gratitude":"AP",
   "Professionalism & Positive Intent":"PR","Living Our Values":"LV"};
 
-// =================================================================
-// MOBILE FIX: Safari iOS Date Parser
-// =================================================================
 function safeDate(dStr) {
   if (!dStr) return new Date();
   let d = new Date(dStr);
@@ -30,9 +27,6 @@ function safeDate(dStr) {
   return isNaN(d.getTime()) ? new Date() : d;
 }
 
-// =================================================================
-// DYNAMIC TIME MODE: QA Week vs Billing Week vs MTD (Month-To-Date)
-// =================================================================
 window.CURRENT_WEEK_MODE = "billing";
 
 function getWeekStart(dateStr){
@@ -40,18 +34,15 @@ function getWeekStart(dateStr){
   const d = safeDate(dateStr); 
   
   if (mode === "mtd") {
-    // Return the 1st of the month to group everything by month
     return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString().substring(0,10);
   }
 
   const day = d.getUTCDay(); 
   let diff;
   if (mode === "qa") {
-    // QA Week: Wednesday to Tuesday
     const offset = day >= 3 ? day - 3 : day + 4;
     diff = d.getUTCDate() - offset;
   } else {
-    // Billing Week: Monday to Sunday
     diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
   }
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff)).toISOString().substring(0,10);
@@ -198,9 +189,6 @@ function processFiles(csvText,rosterTabs){
     stats:{interactions:Object.keys(interactions).length,agents:totalAgents,tlCount:tls.filter(t=>t.name!=="Unassigned").length,weekCount:weeks.length}};
 }
 
-// =================================================================
-// SURVEY PROCESSING
-// =================================================================
 function processSurveys(csvText){
   if(!csvText)return{agents:{},total:0,avgRating:0,responseRate:0};
   const csv=Papa.parse(csvText,{header:true,skipEmptyLines:true});
@@ -311,8 +299,17 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
 }
 
 // =================================================================
-// COACHING ENGINE
+// NEW FEATURE: Most Improved Agents (Momentum)
 // =================================================================
+function getMostImprovedAgents(agents, wIdx) {
+  if (wIdx < 1) return [];
+  return agents.map(a => {
+    const cur = a.w[wIdx], prev = a.w[wIdx - 1];
+    if (cur == null || prev == null) return null;
+    return { a, n: a.n, imp: +(cur - prev).toFixed(1), cur };
+  }).filter(x => x && x.imp > 0).sort((a, b) => b.imp - a.imp).slice(0, 3);
+}
+
 function getStrengths(agent,n=3){
   return SCS.map(c=>({code:c,name:SC_FULL[c],pct:agent.sc[c]||0}))
     .sort((a,b)=>b.pct-a.pct).slice(0,n);
@@ -385,9 +382,6 @@ function exportCoachingCSV(tls,wIdx,surveyData){
   link.click();URL.revokeObjectURL(url);
 }
 
-// =================================================================
-// COMPUTATION ENGINE
-// =================================================================
 function getAgentAvg(a,wIdx){return a.w[wIdx];}
 function getAgentTrend(a,wIdx){
   if(wIdx<1)return null;
@@ -468,17 +462,11 @@ function genFocusCards(level,context,wIdx){
   return cards;
 }
 
-// =================================================================
-// COLORS & STYLING
-// =================================================================
 const C={bg:"#0b1120",panel:"#0f1729",card:"#131d33",border:"#1c2a42",text:"#e2e8f0",dim:"#94a3b8",
   muted:"#475569",cyan:"#06b6d4",blue:"#3b82f6",green:"#34d399",red:"#f87171",amber:"#fbbf24",
   purple:"#a78bfa",orange:"#f97316",teal:"#14b8a6"};
 const cs={background:C.card,borderRadius:12,border:"1px solid "+C.border,padding:16};
 
-// =================================================================
-// GOOGLE SHEETS FETCH
-// =================================================================
 function sheetCsvUrl(sheetId,tabName){
   const base="https://docs.google.com/spreadsheets/d/"+sheetId+"/gviz/tq?tqx=out:csv";
   return tabName?base+"&sheet="+encodeURIComponent(tabName):base;
@@ -507,9 +495,6 @@ async function fetchFromSheets(qaSheetId,rosterSheetId,surveySheetId){
   return{...result,surveyData, raw: {qaText, rosterTabs}};
 }
 
-// =================================================================
-// SHARED UI COMPONENTS
-// =================================================================
 function Tp({active,payload,label}){
   if(!active||!payload)return null;
   return <div style={{background:C.panel,border:"1px solid "+C.border,borderRadius:8,padding:"8px 12px",fontSize:11}}>
@@ -592,7 +577,6 @@ function useSort(defaultKey,defaultDir="desc"){
   return{sk,sd,toggle,sortFn};
 }
 
-
 function DonutChart({value,total,color,size=64}){
   const pct=total?value/total:0;
   const r=(size-6)/2;
@@ -620,8 +604,41 @@ function TabButton({label,active,onClick,badge}){
 }
 
 // =================================================================
-// INTERACTION MODAL
+// NEW FEATURE: Quick-Action Command Palette (Ctrl+K)
 // =================================================================
+function CommandPalette({ isOpen, onClose, tls, onSelectAgent }) {
+  const [cmdSearch, setCmdSearch] = useState("");
+  const inputRef = useRef(null);
+  
+  useEffect(() => { 
+    if (isOpen) {
+      setCmdSearch("");
+      setTimeout(() => inputRef.current?.focus(), 50); 
+    }
+  }, [isOpen]);
+  
+  if (!isOpen) return null;
+  
+  const results = tls.flatMap(t => t.agents.filter(a => a.n.toLowerCase().includes(cmdSearch.toLowerCase())).map(a => ({a, t}))).slice(0, 5);
+  
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",justifyContent:"center",paddingTop:"15vh"}} onClick={onClose}>
+    <div onClick={e=>e.stopPropagation()} style={{background:C.panel,border:"1px solid "+C.border,borderRadius:12,width:500,maxWidth:"90%",overflow:"hidden",boxShadow:"0 10px 40px rgba(0,0,0,0.5)", height:"max-content"}}>
+      <div style={{padding:16,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:18,color:C.cyan}}>{"⚡"}</span>
+        <input ref={inputRef} value={cmdSearch} onChange={e=>setCmdSearch(e.target.value)} placeholder="Type an agent's name..." style={{flex:1,background:"transparent",border:"none",color:C.text,fontSize:16,outline:"none"}} onKeyDown={e=>{if(e.key==="Escape")onClose(); if(e.key==="Enter" && results.length) {onSelectAgent(results[0].a, results[0].t); onClose();}}}/>
+        <span style={{fontSize:10,color:C.dim,background:C.bg,padding:"2px 6px",borderRadius:4}}>ESC to close</span>
+      </div>
+      {cmdSearch && results.length > 0 && <div style={{padding:8}}>
+        {results.map(({a,t}, i) => <div key={i} onClick={()=>{onSelectAgent(a,t); onClose();}} style={{padding:"10px 12px",borderRadius:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",background:i===0?C.cyan+"15":"transparent", border:i===0?"1px solid "+C.cyan+"44":"1px solid transparent"}} onMouseEnter={e=>{e.currentTarget.style.background=C.cyan+"15";}} onMouseLeave={e=>{if(i!==0)e.currentTarget.style.background="transparent";}}>
+          <span style={{fontWeight:600,fontSize:13}}>{a.n}</span>
+          <span style={{fontSize:10,color:C.dim}}>{t.name} · {a.w[LATEST_WIDX]||"--"} QA</span>
+        </div>)}
+      </div>}
+      {cmdSearch && results.length === 0 && <div style={{padding:24,textAlign:"center",color:C.dim,fontSize:12}}>No agents found</div>}
+    </div>
+  </div>;
+}
+
 const SC_GROUPS=[
   {label:"Customer Experience",codes:["WW","TL","VT","AP"]},
   {label:"Problem Resolution",codes:["RB","OW","AI"]},
@@ -649,6 +666,9 @@ function ScoreGauge({score,size=80}){
   </div>;
 }
 
+// =================================================================
+// INTERACTION MODAL (Fixed Scroll Layout)
+// =================================================================
 function InteractionModal({interactions,onClose}){
   const[idx,setIdx]=useState(0);
   const[expandedFb,setExpandedFb]=useState({});
@@ -670,9 +690,9 @@ function InteractionModal({interactions,onClose}){
   return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
     onClick={onClose}>
     <div onClick={e=>e.stopPropagation()} style={{background:C.panel,borderRadius:16,border:"1px solid "+C.border,
-      maxWidth:680,width:"100%",maxHeight:"90vh",overflow:"auto",padding:0}}>
+      maxWidth:680,width:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden",padding:0}}>
 
-      <div style={{padding:"14px 24px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+      <div style={{padding:"14px 24px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
           <span style={{fontSize:14,fontWeight:700}}>{int.agent}</span>
           <span style={{fontSize:10,color:C.dim}}>{int.qa} {"·"} {(int.channel||"").toUpperCase()} {"·"} {safeDate(int.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
@@ -689,7 +709,7 @@ function InteractionModal({interactions,onClose}){
         </div>
       </div>
 
-      <div style={{padding:"20px 24px"}}>
+      <div style={{padding:"20px 24px", flex: 1, overflowY:"auto"}}>
 
         {interactions.length>1&&<div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
           {interactions.map((it,i)=><button key={i} onClick={()=>{setIdx(i);setExpandedFb({});}}
@@ -775,7 +795,7 @@ function InteractionModal({interactions,onClose}){
 }
 
 // =================================================================
-// AGENT PROFILE PANEL (With PDF Export & Mobile Fix)
+// AGENT PROFILE PANEL
 // =================================================================
 function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction,isMobile}){
   if(!agent)return null;
@@ -1016,7 +1036,13 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
 
       {profileTab==="history"&&<>
         {agentInts.length>0?<div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {agentInts.slice(-8).reverse().map((int,i)=><div key={i} style={{...cs,padding:14,cursor:"pointer",transition:"all .15s"}}
+          {agentInts.slice(-8).reverse().map((int,i)=>{
+            // NEW FEATURE: Blind Spot Detector
+            const convId = extractConvId(int.url);
+            const survey = surveyData?.byConvId?.[convId];
+            const isBlindSpot = int.score >= 90 && survey?.rating && survey.rating <= 2;
+            
+            return <div key={i} style={{...cs,padding:14,cursor:"pointer",transition:"all .15s"}}
             onClick={()=>onViewInteraction([int])}
             onMouseEnter={e=>e.currentTarget.style.borderColor=C.cyan+"44"} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
@@ -1038,6 +1064,7 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
                   {"↗"} Gladly</a>}
               </div>
             </div>
+            {isBlindSpot && <div style={{marginBottom:8, padding:"3px 8px", background:C.purple+"22", border:"1px solid "+C.purple+"44", borderRadius:4, fontSize:9, color:C.purple, fontWeight:700, display:"inline-block"}}>{"👁"} BLIND SPOT: QA {int.score} but CSAT {survey.rating}★</div>}
             <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:6}}>
               {SCS.map(c=>{const val=int.sc?.[c];const met=val==="Met"||val==="Exceed";const partial=val==="Met Some";
                 return <span key={c} style={{fontSize:8,padding:"2px 5px",borderRadius:3,
@@ -1051,7 +1078,7 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
                   {"“"}{c.substring(0,150)}{c.length>150?"...":""}{"”"}
                 </div>
               </div>)}
-          </div>)}
+          </div>;})}
         </div>:<EmptyState message="No evaluations found for this agent"/>}
       </>}
     </div>
@@ -1080,6 +1107,9 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
 
   const initials=(name)=>{const p=name.split(" ");return(p[0]?.[0]||"")+(p[p.length-1]?.[0]||"");};
   const siteColors={HMO:"#3b82f6",JAM:"#a78bfa",PAN:"#f59e0b"};
+  
+  // NEW FEATURE: Momentum Logic
+  const mostImproved = getMostImprovedAgents(allAgents, wIdx);
 
   return <div>
     <HistoricalBanner wIdx={wIdx}/>
@@ -1121,6 +1151,23 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
             {critical.slice(0,3).map(a=>a.n).join(", ")}{critical.length>3?" +"+String(critical.length-3)+" more":""}
           </div>
         </div>
+        
+        {/* NEW FEATURE: Momentum Board UI */}
+        {mostImproved.length > 0 && (
+          <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
+            <div style={{fontSize:10,color:"#6ee7b7",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>🔥 Most Improved Agents</div>
+            {mostImproved.map((mi, i) => (
+               <div key={i} onClick={() => {
+                 const t = filteredTLs.find(tl => tl.agents.some(x => x.n === mi.n));
+                 if(t) onSelectAgent(mi.a, t);
+               }} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",cursor:"pointer",borderBottom:i<mostImproved.length-1?"1px solid #1a4a32":"none"}}
+               onMouseEnter={e=>e.currentTarget.style.opacity=0.8} onMouseLeave={e=>e.currentTarget.style.opacity=1}>
+                 <span style={{fontSize:11,color:C.text,fontWeight:600}}>{mi.n}</span>
+                 <span style={{fontSize:10,color:C.green,fontWeight:700}}>+{mi.imp} <span style={{color:C.green,opacity:0.6}}>({mi.cur})</span></span>
+               </div>
+            ))}
+          </div>
+        )}
 
         {csatFindings&&csatFindings.length>0&&<div style={{...cs,flex:1}}>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>CSAT-QA Insights</div>
@@ -1679,12 +1726,27 @@ export default function NextSkill(){
   const[search,setSearch]=useState("");
   const intervalRef=React.useRef(null);
   const initialLoad=React.useRef(false);
+  
+  // NEW FEATURE: CMD+K State
+  const[showCmdK, setShowCmdK] = useState(false);
 
   React.useEffect(() => {
     const handleResize = () => setIsMobile(window.innerWidth <= 768);
     handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // NEW FEATURE: CMD+K Listener
+  React.useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowCmdK(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const toggleWeekMode = (mode) => {
@@ -1695,13 +1757,11 @@ export default function NextSkill(){
     
     setTimeout(() => {
       try {
-        const newResult = processFiles(config.qaId, config.rosterId); // Triggering recalculation logic internally or via fetch
-        // To keep it simple and safe from quota issues, let's just trigger a re-fetch and process
+        const newResult = processFiles(config.qaId, config.rosterId);
       } catch(e) { console.error("Error recalculating weeks:", e); }
     }, 50);
   };
 
-  // NUEVA FUNCIÓN: Cambio de tab inteligente
   const changeTab = (newTab) => {
     setTab(newTab);
     if (newTab !== "dashboard") {
@@ -1715,7 +1775,6 @@ export default function NextSkill(){
   const alerts=useMemo(()=>!D?[]:generateAlerts(D.tls,wIdx),[data,wIdx]);
   const csatData=useMemo(()=>!D?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(D.tls,D.surveyData,D.rawInts),[data]);
   
-  // EFECTOS DE CARGA (Sin LocalStorage temporalmente)
   const handleRefresh=useCallback(async()=>{
     if(!config||refreshing)return;setRefreshing(true);
     try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
@@ -1754,7 +1813,6 @@ export default function NextSkill(){
   },[]);
   const navPush=(state)=>window.history.pushState(state,"");
 
-  // Add robust trigger for weekMode toggle
   React.useEffect(() => {
     if(!config || !initialLoad.current) return;
     handleRefresh();
@@ -1816,20 +1874,9 @@ export default function NextSkill(){
             {[...new Set(D.tls.map(t=>t.site))].filter(s=>s&&s!=="???").sort().map(s=><option key={s} value={s}>{s}</option>)}</select>
           
           <div style={{position:"relative"}}>
-            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search agent..."
-              style={{...sel,width:160,paddingLeft:28,fontSize:10}}/>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search agent... (Ctrl+K)"
+              style={{...sel,width:160,paddingLeft:28,fontSize:10}} onClick={()=>setShowCmdK(true)} readOnly/>
             <span style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:12,color:C.muted}}>{"🔍"}</span>
-            {search&&<div style={{position:"absolute",top:"100%",left:0,right:0,background:C.panel,border:"1px solid "+C.border,borderRadius:6,maxHeight:200,overflowY:"auto",zIndex:100,marginTop:4}}>
-              {D.tls.flatMap(t=>t.agents.filter(a=>a.n.toLowerCase().includes(search.toLowerCase())).map(a=>({a,t})))
-                .slice(0,8).map(({a,t},i)=><div key={i} onClick={()=>{onSelectAgent(a,t);setSearch("");}}
-                  style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid "+C.border+"22",fontSize:11}}
-                  onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                  <div style={{fontWeight:600}}>{a.n}</div>
-                  <div style={{fontSize:9,color:C.dim}}>{t.name} {"·"} {t.site}</div>
-                </div>)}
-              {D.tls.flatMap(t=>t.agents.filter(a=>a.n.toLowerCase().includes(search.toLowerCase()))).length===0&&
-                <div style={{padding:"8px 12px",fontSize:10,color:C.dim}}>No agents found</div>}
-            </div>}
           </div>
           <button onClick={handleRefresh} disabled={refreshing} style={{...sel,color:refreshing?C.amber:C.cyan}}>
             {refreshing?"⏳":"↻"}</button>
@@ -1886,7 +1933,8 @@ export default function NextSkill(){
       <span style={{fontSize:9,color:C.muted,fontFamily:"monospace"}}>NextSkill v5.5 {"·"} QA Coaching Platform {"·"} {D.tls.length} TLs {"·"} {D.tls.reduce((s,t)=>s+t.agents.length,0)} agents</span>
     </div>
 
-    {/* INTERACTION MODAL */}
+    {/* MODALS */}
     {modalInts&&<InteractionModal interactions={modalInts} onClose={()=>setModalInts(null)}/>}
+    <CommandPalette isOpen={showCmdK} onClose={()=>setShowCmdK(false)} tls={D.tls} onSelectAgent={onSelectAgent} />
   </div>;
 }
