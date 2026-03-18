@@ -86,13 +86,22 @@ function processFiles(csvText,rosterTabs){
   cfs.forEach(r=>{
     const iid=r["Interaction ID"];
     if(!interactions[iid]){
+      // NUEVO: Calculamos la duración en minutos aquí mismo
+      const sDate = safeDate(r["Time Started"]);
+      const cDate = safeDate(r["Time Completed"]);
+      let durationMins = 0;
+      if (sDate && cDate && !isNaN(sDate) && !isNaN(cDate)) {
+          durationMins = (cDate.getTime() - sDate.getTime()) / 60000;
+      }
+
       interactions[iid]={
         agent:r["Name"],email:r["Email"].trim().toLowerCase(),
         qa:r["Taker Name"],score:parseFloat(r["Overall Review Score"])||0,
         channel:(r["Channel"]||"").substring(0,3)||"???",
         date:r["Time Started"],sc:{},proc:null,notes:null,
         assignmentId:r["Assignment ID"]||"",interactionId:iid,
-        url:r["Interaction URL"]||"",comments:{}
+        url:r["Interaction URL"]||"",comments:{},
+        duration: durationMins // Guardamos la duración para usarla en el dashboard
       };
     }
     const q=r["Question Text"]||"";
@@ -183,7 +192,8 @@ function processFiles(csvText,rosterTabs){
     id:int.email+"_"+int.date,agent:int.agent,email:int.email,qa:int.qa,
     score:int.score,channel:int.channel,date:int.date,sc:int.sc,
     proc:int.proc,notes:int.notes,comments:int.comments||{},
-    assignmentId:int.assignmentId,interactionId:int.interactionId,url:int.url
+    assignmentId:int.assignmentId,interactionId:int.interactionId,url:int.url,
+    duration:int.duration // Propagamos la duración
   }));
   return{weeks:weekLabels,weekISO:weeks,tls,qas,rawInts,
     stats:{interactions:Object.keys(interactions).length,agents:totalAgents,tlCount:tls.filter(t=>t.name!=="Unassigned").length,weekCount:weeks.length}};
@@ -1518,45 +1528,78 @@ function CoachingTab({alerts,wIdx,onSelectAgent,tls}){
 }
 
 function QAAnalyticsTab({wIdx}){
-  const qaSort=useSort("n");
+  const qaSort = useSort("n");
+  const [view, setView] = useState("calibration"); 
   
-  // 1. EL ARREGLO DEL FILTRO DE FECHA (El "pecado" corregido)
-  // Obtenemos el ISO de la semana seleccionada en el menú superior
   const targetWeek = D.weekISO[wIdx];
-  // Filtramos SOLO las evaluaciones que ocurrieron en esa semana
   const weekInts = (D.rawInts || []).filter(int => getWeekStart(int.date) === targetWeek);
 
-  // 2. PROCESAMIENTO INTELIGENTE (Calculando desviaciones de esa semana)
   const qaMap = {};
   let totalScore = 0;
-  
+
   weekInts.forEach(int => {
-    if(!qaMap[int.qa]) qaMap[int.qa] = { name: int.qa, scores: [], n: 0 };
-    qaMap[int.qa].scores.push(int.score);
-    qaMap[int.qa].n++;
+    if(!qaMap[int.qa]) {
+      qaMap[int.qa] = { name: int.qa, scores: [], n: 0, chars: 0, commentsCount: 0, metTotal: 0, metWithNote: 0, criticalFails: 0, totalValidMins: 0, validEvalsCount: 0 };
+    }
+    const q = qaMap[int.qa];
+    q.scores.push(int.score);
+    q.n++;
     totalScore += int.score;
+
+    if(int.score < 50) q.criticalFails++;
+
+    const cmts = Object.values(int.comments || {});
+    cmts.forEach(c => {
+      if (c.trim().length > 0) {
+        q.chars += c.trim().length;
+        q.commentsCount++;
+      }
+    });
+
+    Object.keys(int.comments || {}).forEach(qText => {
+        const code = SC_MAP[qText];
+        if (code && (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed")) {
+            q.metWithNote++;
+        }
+    });
+
+    SCS.forEach(code => {
+       if (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed") q.metTotal++;
+    });
+
+    // NUEVO: Filtro Inteligente de Duración (QA AHT)
+    // Solo contamos las evaluaciones que tomaron entre 1 y 120 minutos reales
+    if (int.duration >= 1 && int.duration <= 120) {
+        q.totalValidMins += int.duration;
+        q.validEvalsCount++;
+    }
   });
 
-  // Promedio global de todo el equipo de calidad EN ESA SEMANA
   const teamAvg = weekInts.length ? +(totalScore / weekInts.length).toFixed(1) : 0;
 
   const qaData = Object.values(qaMap).map(q => {
     const avg = +(q.scores.reduce((s,v)=>s+v,0) / q.n).toFixed(1);
     const variance = q.scores.reduce((s,v)=>s+(v-avg)**2,0) / q.n;
-    const sd = +Math.sqrt(variance).toFixed(1); // Volatilidad
-    const deviation = +(avg - teamAvg).toFixed(1); // Sesgo
+    const sd = +Math.sqrt(variance).toFixed(1);
+    const deviation = +(avg - teamAvg).toFixed(1);
 
-    // Inteligencia automática para la columna de "Focus Area"
+    const avgChars = q.commentsCount > 0 ? Math.round(q.chars / q.commentsCount) : 0;
+    const metNotePct = q.metTotal > 0 ? Math.round((q.metWithNote / q.metTotal) * 100) : 0;
+    const failRate = q.n > 0 ? Math.round((q.criticalFails / q.n) * 100) : 0;
+    
+    // Promedio de tiempo por evaluación (QA AHT)
+    const avgAHT = q.validEvalsCount > 0 ? Math.round(q.totalValidMins / q.validEvalsCount) : 0;
+
     let focusArea = "Calibrated";
     let statusColor = C.green;
     if (deviation < -5) { focusArea = "Too Severe"; statusColor = C.red; }
     else if (deviation > 5) { focusArea = "Too Lenient"; statusColor = C.amber; }
     else if (sd > 8) { focusArea = "Inconsistent Criteria"; statusColor = C.orange; }
+    else if (avgChars > 0 && avgChars < 30) { focusArea = "Poor Feedback"; statusColor = C.purple; }
 
-    return { ...q, avg, sd, deviation, focusArea, statusColor };
+    return { ...q, avg, sd, deviation, focusArea, statusColor, avgChars, metNotePct, failRate, avgAHT };
   }).filter(q => q.n > 0);
 
-  // 3. GENERADOR DE ALERTAS (Bias Detection)
   const alerts = [];
   if (qaData.length > 0) {
     const mostSevere = [...qaData].sort((a,b)=>a.deviation - b.deviation)[0];
@@ -1569,7 +1612,6 @@ function QAAnalyticsTab({wIdx}){
     }
   }
 
-  // Tooltip personalizado para el Scatter Plot
   const ScatterTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
@@ -1577,23 +1619,39 @@ function QAAnalyticsTab({wIdx}){
         <div style={{background:C.panel,border:"1px solid "+C.border,borderRadius:8,padding:"10px 14px",fontSize:11,boxShadow:"0 4px 12px rgba(0,0,0,0.5)"}}>
           <div style={{color:C.text, fontWeight:800, marginBottom:6, fontSize:12}}>{data.name}</div>
           <div style={{color:C.cyan, marginBottom:2}}>Avg Score: <b style={{fontFamily:"monospace",fontSize:12}}>{data.avg}</b></div>
-          <div style={{color:data.sd>7?C.red:C.amber}}>Volatility (SD): <b style={{fontFamily:"monospace",fontSize:12}}>{data.sd}</b></div>
-          <div style={{color:C.dim, marginTop:4, paddingTop:4, borderTop:"1px solid "+C.border}}>Evaluations: <b>{data.n}</b></div>
+          <div style={{color:data.sd>7?C.red:C.amber}}>Volatility: <b style={{fontFamily:"monospace",fontSize:12}}>{data.sd}</b></div>
+          <div style={{color:C.purple, marginBottom:2}}>Avg Feedback: <b style={{fontFamily:"monospace",fontSize:12}}>{data.avgChars} chars</b></div>
         </div>
       );
     }
     return null;
   };
 
+  let tableColumns = [];
+  if (view === "calibration") {
+    tableColumns = [["name","QA Analyst"],["n","Evals",60],["avg","Avg Score",80],["deviation","Dev. from Avg",100],["sd","Volatility (SD)",100],["focusArea","Focus Area"]];
+  } else if (view === "feedback") {
+    tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgChars","Avg Comment Length",140],["metNotePct","Positive Reinforcement",150],["commentsCount","Total Notes",90],["focusArea","Focus Area"]];
+  } else {
+    // NUEVO: Agregamos el AHT a la vista de Operaciones
+    tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgAHT","Avg Time (mins)",120],["failRate","Zero-Out Rate (<50)",140],["avg","Avg Score",80],["focusArea","Focus Area"]];
+  }
+
+  const btnStyle = (active) => ({
+    fontSize:10, padding:"6px 14px", borderRadius:6, cursor:"pointer", fontWeight:600, border:"none",
+    background: active ? C.cyan+"22" : "transparent",
+    color: active ? C.cyan : C.dim,
+    borderBottom: active ? "2px solid "+C.cyan : "2px solid transparent",
+    transition: "all 0.2s"
+  });
+
   return <div>
-    {/* KPI Principales Actualizados a la semana */}
     <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
       <KpiCard value={qaData.length} label={`Active Analysts (${WEEKS[wIdx]})`} color={C.purple} icon={"🕵️"}/>
       <KpiCard value={weekInts.length} label="Total Evaluations" color={C.blue} icon={"📋"}/>
       <KpiCard value={teamAvg||"--"} label="Weekly Team Average" color={C.cyan} icon={"⌀"}/>
     </div>
 
-    {/* Tarjetas de Alertas Inteligentes (Bias Detection) */}
     {alerts.length > 0 && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))",gap:12,marginBottom:16}}>
       {alerts.map((al, i) => (
         <div key={i} style={{...cs, borderLeft: "3px solid " + al.color, display: "flex", gap: 12, alignItems: "center"}}>
@@ -1607,7 +1665,6 @@ function QAAnalyticsTab({wIdx}){
       ))}
     </div>}
 
-    {/* El Cuadrante de Calibración (Scatter Plot) */}
     <div style={{...cs,marginBottom:16}}>
       <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4}}>
         <div style={{fontSize:12,fontWeight:700,color:C.text}}>Calibration Quadrant</div>
@@ -1621,11 +1678,8 @@ function QAAnalyticsTab({wIdx}){
             <YAxis type="number" dataKey="sd" name="Volatility" domain={[0, 'auto']} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} />
             <ZAxis type="number" dataKey="n" range={[60, 400]} name="Evaluations" />
             <Tooltip cursor={{strokeDasharray: '3 3'}} content={<ScatterTooltip/>} />
-            
-            {/* Líneas divisorias del cuadrante */}
             <ReferenceLine x={teamAvg} stroke={C.cyan+"66"} strokeDasharray="4 4" label={{value:`Team Avg (${teamAvg})`, position:"top", fill:C.cyan, fontSize:10}} />
             <ReferenceLine y={5} stroke={C.amber+"66"} strokeDasharray="4 4" label={{value:"Volatility Threshold", position:"insideRight", fill:C.amber, fontSize:10}} />
-            
             <Scatter name="Analysts" data={qaData}>
               {qaData.map((entry, index) => (
                 <Cell key={`cell-${index}`} fill={entry.statusColor} opacity={0.8} />
@@ -1636,28 +1690,56 @@ function QAAnalyticsTab({wIdx}){
       ) : <EmptyState message={`No QA evaluations found for ${WEEKS[wIdx]}.`} />}
     </div>
 
-    {/* Tabla Inteligente */}
     <div style={{...cs, overflowX: "auto"}}>
-      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Reviewer Bias & Alignment <span style={{fontSize:10, fontWeight:400, color:C.dim}}>(Weekly: {WEEKS[wIdx]})</span></div>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.text}}>Analyst Performance Lenses <span style={{fontSize:10, fontWeight:400, color:C.dim}}>(Weekly: {WEEKS[wIdx]})</span></div>
+        
+        <div style={{display:"flex", background:C.bg, borderRadius:8, padding:2, border:"1px solid "+C.border}}>
+          <button onClick={() => setView("calibration")} style={btnStyle(view === "calibration")}>🎯 Calibration</button>
+          <button onClick={() => setView("feedback")} style={btnStyle(view === "feedback")}>✍️ Coaching & Feedback</button>
+          <button onClick={() => setView("ops")} style={btnStyle(view === "ops")}>⏱️ Operations</button>
+        </div>
+      </div>
+
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "500px"}}>
-        <SortHeader columns={[["name","QA Analyst"],["n","Evals",60],["avg","Avg Score",80],["deviation","Dev. from Avg",100],["sd","Volatility (SD)",100],["focusArea","Focus Area"]]}
-            sortKey={qaSort.sk} sortDir={qaSort.sd} onSort={qaSort.toggle}/>
+        <SortHeader columns={tableColumns} sortKey={qaSort.sk} sortDir={qaSort.sd} onSort={qaSort.toggle}/>
         <tbody>{[...qaData].sort((a,b)=>qaSort.sortFn(a[qaSort.sk],b[qaSort.sk])).map((q,i)=>
           <tr key={i} style={{borderBottom:"1px solid "+C.border+"22", transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
             <td style={{padding:"10px",fontWeight:600, color:C.text}}>{q.name}</td>
             <td style={{padding:"10px",fontFamily:"monospace"}}>{q.n}</td>
-            <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:q.avg>=GOAL?C.green:C.amber}}>{q.avg}</td>
             
-            {/* Nueva Columna: Desviación del Promedio */}
-            <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600}}>
-              <span style={{color: q.deviation > 0 ? C.cyan : q.deviation < 0 ? C.red : C.dim}}>
-                {q.deviation > 0 ? "▲ +" : q.deviation < 0 ? "▼ " : ""}{q.deviation !== 0 ? q.deviation : "--"} pts
-              </span>
-            </td>
-            
-            <td style={{padding:"10px",fontFamily:"monospace",color:q.sd>7?C.orange:C.dim}}>{q.sd}</td>
-            
-            {/* Nueva Columna: Focus Area */}
+            {view === "calibration" && <>
+              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:q.avg>=GOAL?C.green:C.amber}}>{q.avg}</td>
+              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600}}>
+                <span style={{color: q.deviation > 0 ? C.cyan : q.deviation < 0 ? C.red : C.dim}}>
+                  {q.deviation > 0 ? "▲ +" : q.deviation < 0 ? "▼ " : ""}{q.deviation !== 0 ? q.deviation : "--"} pts
+                </span>
+              </td>
+              <td style={{padding:"10px",fontFamily:"monospace",color:q.sd>7?C.orange:C.dim}}>{q.sd}</td>
+            </>}
+
+            {view === "feedback" && <>
+              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600, color: q.avgChars < 30 ? C.red : C.cyan}}>
+                {q.avgChars} chars/eval
+              </td>
+              <td style={{padding:"10px",fontFamily:"monospace"}}>
+                <div style={{display:"flex", alignItems:"center", gap:6}}>
+                  <div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:q.metNotePct+"%", height:"100%", background:C.purple, borderRadius:2}}/></div>
+                  <span>{q.metNotePct}%</span>
+                </div>
+              </td>
+              <td style={{padding:"10px",fontFamily:"monospace", color:C.dim}}>{q.commentsCount} notes</td>
+            </>}
+
+            {view === "ops" && <>
+              {/* NUEVO: Renderizando el Average Handle Time */}
+              <td style={{padding:"10px",fontFamily:"monospace", color:C.text}}>
+                {q.avgAHT > 0 ? `${q.avgAHT} mins` : "--"}
+              </td>
+              <td style={{padding:"10px",fontFamily:"monospace", color: q.failRate > 10 ? C.red : C.dim}}>{q.failRate}% fatals</td>
+              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:C.cyan}}>{q.avg}</td>
+            </>}
+
             <td style={{padding:"10px"}}>
               <span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background: q.statusColor+"15", color: q.statusColor, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, border:"1px solid "+q.statusColor+"33"}}>
                 {q.focusArea}
