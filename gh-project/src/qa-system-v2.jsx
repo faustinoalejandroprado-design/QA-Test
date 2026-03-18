@@ -531,7 +531,7 @@ function KpiCard({value,label,color,delta,icon,onClick,sub}){
     transition:"all .2s",borderBottom:"2px solid "+color+"33",position:"relative",overflow:"hidden"}}
     onMouseEnter={e=>{e.currentTarget.style.borderBottomColor=color;e.currentTarget.style.background=color+"08";}}
     onMouseLeave={e=>{e.currentTarget.style.borderBottomColor=color+"33";e.currentTarget.style.background=C.glass;}}>
-    <div style={{position:"absolute",top:-20,right:-20,width:60,height:60,borderRadius:"50%",background:color+"08"}}/>
+    <div style={{position:"absolute",top:-20,right:-20,width:60,height:60,borderRadius:"50%",background:color+"08"}}></div>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       <div>
         <div style={{fontSize:10,color:C.dim,marginBottom:6,fontWeight:500}}>{label}</div>
@@ -548,7 +548,7 @@ function FocusCard({card,onClick}){
     transition:"all .2s",borderLeft:"3px solid "+card.color,position:"relative",overflow:"hidden"}}
     onMouseEnter={e=>{e.currentTarget.style.background=card.color+"0a";e.currentTarget.style.transform="translateY(-1px)";}}
     onMouseLeave={e=>{e.currentTarget.style.background=C.glass;e.currentTarget.style.transform="none";}}>
-    <div style={{position:"absolute",top:-15,right:-15,width:50,height:50,borderRadius:"50%",background:card.color+"08"}}/>
+    <div style={{position:"absolute",top:-15,right:-15,width:50,height:50,borderRadius:"50%",background:card.color+"08"}}></div>
     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
       <div style={{width:28,height:28,borderRadius:7,background:card.color+"15",display:"flex",alignItems:"center",justifyContent:"center"}}>
         <span style={{fontSize:13}}>{card.icon}</span>
@@ -702,7 +702,7 @@ function InteractionModal({interactions,onClose}){
               <div style={{fontSize:13,fontWeight:600,color:C.green}}>{"✓"} At or above goal</div>:
               <div>
                 <div style={{fontSize:13,fontWeight:600,color:int.score>=60?C.amber:C.red}}>{GOAL-int.score} points below</div>
-                <div style={{width:140,height:4,background:C.border,borderRadius:2,marginTop:6,overflow:"hidden"}}><div style={{width:Math.round(int.score/GOAL*100)+"%",height:"100%",borderRadius:2,background:int.score>=60?C.amber:C.red}}/></div>
+                <div style={{width:140,height:4,background:C.border,borderRadius:2,marginTop:6,overflow:"hidden"}}><div style={{width:Math.round(int.score/GOAL*100)+"%",height:"100%",borderRadius:2,background:int.score>=60?C.amber:C.red}}></div></div>
               </div>}
           </div>
         </div>
@@ -747,7 +747,6 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
   
   if(!qaInts.length) return null;
 
-  // Calculos para QA
   let totalScore = 0, criticalFails = 0, totalValidMins = 0, validEvals = 0;
   const channelCounts = {};
   const allComments = [];
@@ -760,12 +759,10 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
     channelCounts[int.channel] = (channelCounts[int.channel]||0) + 1;
     if (int.duration >= 1 && int.duration <= 120) { totalValidMins += int.duration; validEvals++; }
     
-    // Comments
     Object.entries(int.comments || {}).forEach(([qText, text]) => {
       if(text.trim()) allComments.push({ agent: int.agent, text: text.trim(), length: text.trim().length, date: int.date, score: int.score });
     });
 
-    // Deductions
     SCS.forEach(c => {
       const val = int.sc?.[c];
       if (val) {
@@ -780,7 +777,6 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
   allComments.sort((a,b) => new Date(b.date) - new Date(a.date));
   const anomalies = qaInts.filter(i => i.duration > 0 && i.duration < 2);
 
-  // Promedios del equipo para comparar el radar
   const teamDeductions = {};
   SCS.forEach(c => teamDeductions[c] = { deducts: 0, total: 0 });
   allWeekInts.forEach(int => {
@@ -884,7 +880,7 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
                <div key={ch} style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
                   <span style={{fontSize:10, fontWeight:600, textTransform:"uppercase"}}>{ch}</span>
                   <div style={{display:"flex", alignItems:"center", gap:8}}>
-                     <div style={{width:100, height:6, background:C.bg, borderRadius:3}}><div style={{width: (count/qaInts.length)*100+"%", height:"100%", background:C.cyan, borderRadius:3}}/></div>
+                     <div style={{width:100, height:6, background:C.bg, borderRadius:3}}><div style={{width: (count/qaInts.length)*100+"%", height:"100%", background:C.cyan, borderRadius:3}}></div></div>
                      <span style={{fontSize:10, fontFamily:"monospace", width:20, textAlign:"right"}}>{count}</span>
                   </div>
                </div>
@@ -1025,13 +1021,13 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
             <div><span style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.cyan}}>{csatCorr.qaScore||"--"}</span><span style={{fontSize:10,color:C.dim}}> QA</span></div>
           </div>
           {(()=>{const al=csatCorr.alignment; const labels={aligned:{text:"Aligned",desc:"CSAT matches QA",color:C.green}, csat_leads:{text:"CSAT Leads",desc:"Process gaps, customer happy",color:C.amber}, qa_leads:{text:"QA Leads",desc:"Meets QA but customer unhappy",color:C.amber}, both_low:{text:"Needs Attention",desc:"Both low — priority",color:C.red}, neutral:{text:"Moderate",desc:"Metrics in mid-range",color:C.dim}}; const l=labels[al]||labels.neutral;
-            return <div style={{fontSize:10,display:"flex",alignItems:"center",gap:6}}><span style={{width:6,height:6,borderRadius:"50%",background:l.color}}/><span style={{color:l.color,fontWeight:600}}>{l.text}</span><span style={{color:C.dim}}>{"—"} {l.desc}</span></div>;
+            return <div style={{fontSize:10,display:"flex",alignItems:"center",gap:6}}><span style={{width:6,height:6,borderRadius:"50%",background:l.color}}></span><span style={{color:l.color,fontWeight:600}}>{l.text}</span><span style={{color:C.dim}}>{"—"} {l.desc}</span></div>;
           })()}
         </div>}
 
         {risk.reasons.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+(risk.level==="HIGH"?C.red:C.amber)}}>
           <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:6}}>Risk Factors</div>
-          {risk.reasons.map((r,i)=><div key={i} style={{fontSize:10,color:risk.level==="HIGH"?C.red:C.amber,marginTop:3,display:"flex",alignItems:"center",gap:6}}><span style={{width:4,height:4,borderRadius:"50%",background:risk.level==="HIGH"?C.red:C.amber,flexShrink:0}}/> {r}</div>)}
+          {risk.reasons.map((r,i)=><div key={i} style={{fontSize:10,color:risk.level==="HIGH"?C.red:C.amber,marginTop:3,display:"flex",alignItems:"center",gap:6}}><span style={{width:4,height:4,borderRadius:"50%",background:risk.level==="HIGH"?C.red:C.amber,flexShrink:0}}></span> {r}</div>)}
         </div>}
 
         {survey&&<div style={{...cs,borderLeft:"3px solid "+C.purple}}>
@@ -1073,7 +1069,7 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
           <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:8}}>All Behaviors</div>
           {SCS.map(c=><div key={c} style={{display:"flex",alignItems:"center",gap:8,marginTop:5}}>
             <span style={{fontSize:9,color:C.dim,width:75,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{SC_FULL[c]}</span>
-            <div style={{flex:1,height:5,background:C.bg,borderRadius:3,overflow:"hidden"}}><div style={{width:(agent.sc[c]||0)+"%",height:"100%",borderRadius:3, background:(agent.sc[c]||0)>=70?C.green:(agent.sc[c]||0)>=50?C.amber:C.red,transition:"width .4s"}}/></div>
+            <div style={{flex:1,height:5,background:C.bg,borderRadius:3,overflow:"hidden"}}><div style={{width:(agent.sc[c]||0)+"%",height:"100%",borderRadius:3, background:(agent.sc[c]||0)>=70?C.green:(agent.sc[c]||0)>=50?C.amber:C.red,transition:"width .4s"}}></div></div>
             <span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:30,textAlign:"right", color:(agent.sc[c]||0)>=70?C.green:(agent.sc[c]||0)>=50?C.amber:C.red}}>{agent.sc[c]||0}%</span>
           </div>)}
         </div>
@@ -1288,7 +1284,7 @@ function TLView({tl,wIdx,onSelectAgent, isMobile}){
       <div style={{...cs, position:"relative", overflow:"hidden"}}>
          <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}><div style={{fontSize:10, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Team Avg</div>{wow!=null&&<WoWBadge delta={wow}/>}</div>
          <div style={{fontSize:32, fontWeight:800, color:"#fff", fontFamily:"'Geist Mono',monospace", marginTop:8}}>{avg}</div>
-         <div style={{width:"100%", background:C.bg, height:6, borderRadius:3, marginTop:12}}><div style={{width: Math.min(100, (avg/GOAL)*100)+"%", background:C.cyan, height:"100%", borderRadius:3}}/></div>
+         <div style={{width:"100%", background:C.bg, height:6, borderRadius:3, marginTop:12}}><div style={{width: Math.min(100, (avg/GOAL)*100)+"%", background:C.cyan, height:"100%", borderRadius:3}}></div></div>
          <div style={{display:"flex", justifyContent:"space-between", fontSize:9, color:C.dim, marginTop:6, fontFamily:"monospace"}}><span>Current</span><span>Goal: {GOAL}</span></div>
       </div>
       <div style={{...cs, border:"1px solid "+C.red+"44", background:"#1a0f14"}}>
@@ -1308,7 +1304,7 @@ function TLView({tl,wIdx,onSelectAgent, isMobile}){
          {scAvgs.map((b,i) => (
             <div key={b.code} style={{marginBottom: i===0?12:0}}>
               <div style={{display:"flex", justifyContent:"space-between", fontSize:10, color:C.text, marginBottom:6}}><span style={{whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:120}}>{SC_FULL[b.code]}</span><span style={{fontFamily:"monospace", color: i===0?C.orange:C.amber, fontWeight:700}}>{b.val.toFixed(0)}%</span></div>
-              <div style={{width:"100%", background:C.bg, height:4, borderRadius:2}}><div style={{width: b.val+"%", background: i===0?C.orange:C.amber, height:"100%", borderRadius:2}}/></div>
+              <div style={{width:"100%", background:C.bg, height:4, borderRadius:2}}><div style={{width: b.val+"%", background: i===0?C.orange:C.amber, height:"100%", borderRadius:2}}></div></div>
             </div>
          ))}
       </div>
@@ -1323,7 +1319,9 @@ function TLView({tl,wIdx,onSelectAgent, isMobile}){
           const isCritical = cat === "Critical" || cat === "Stagnant"; const isConvertible = cat === "Convertible"; const rowBg = isCritical ? C.red+"08" : isConvertible ? C.cyan+"08" : "transparent";
           return <tr key={i} onClick={()=>onSelectAgent(a)} style={{cursor:"pointer", borderBottom:"1px solid "+C.border+"33", background: rowBg, transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.background = isCritical ? C.red+"15" : isConvertible ? C.cyan+"15" : C.cyan+"08";}} onMouseLeave={e=>{e.currentTarget.style.background = rowBg;}}>
             <td style={{padding:"12px 20px", fontWeight:600, display:"flex", alignItems:"center", gap:8}}>
-              {name} {isCritical && <span style={{width:6, height:6, borderRadius:"50%", background:C.red, boxShadow:"0 0 4px "+C.red}/>} {isConvertible && fastestPath?.n === name && <span style={{width:6, height:6, borderRadius:"50%", background:C.cyan, boxShadow:"0 0 4px "+C.cyan}} title="Fastest Path"/>}
+              {name} 
+              {isCritical ? <div style={{width:6, height:6, borderRadius:"50%", background:C.red, boxShadow:"0 0 4px "+C.red}}></div> : null} 
+              {(isConvertible && fastestPath && fastestPath.n === name) ? <div style={{width:6, height:6, borderRadius:"50%", background:C.cyan, boxShadow:"0 0 4px "+C.cyan}} title="Fastest Path"></div> : null}
             </td>
             <td style={{padding:"12px 20px"}}><span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background:color+"15", color:color, fontWeight:700, textTransform:"uppercase", border:"1px solid "+color+"33", letterSpacing:0.5}}>{cat}</span></td>
             <td style={{padding:"12px 20px"}}><RiskBadge level={risk}/></td>
@@ -1363,7 +1361,7 @@ function AgentView({agent,tl,wIdx}){
         </ResponsiveContainer>
       </div>
       <div style={{...cs}}><div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Service Commitments</div>
-        {scData.map((d,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}><span style={{fontSize:9,color:C.dim,width:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.name}</span><div style={{flex:1,height:6,background:C.bg,borderRadius:3,overflow:"hidden"}}><div style={{width:d.val+"%",height:"100%",borderRadius:3,background:d.val>=70?C.green:d.val>=50?C.amber:C.red}}/></div><span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:28,textAlign:"right",color:d.val>=70?C.green:d.val>=50?C.amber:C.red}}>{d.val}%</span></div>)}
+        {scData.map((d,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}><span style={{fontSize:9,color:C.dim,width:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.name}</span><div style={{flex:1,height:6,background:C.bg,borderRadius:3,overflow:"hidden"}}><div style={{width:d.val+"%",height:"100%",borderRadius:3,background:d.val>=70?C.green:d.val>=50?C.amber:C.red}}></div></div><span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:28,textAlign:"right",color:d.val>=70?C.green:d.val>=50?C.amber:C.red}}>{d.val}%</span></div>)}
       </div>
     </div>
   </div>;
@@ -1505,7 +1503,7 @@ function QAAnalyticsTab({wIdx, onSelectQA}){
             </>}
             {view === "feedback" && <>
               <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600, color: q.avgChars < 30 ? C.red : C.cyan}}>{q.avgChars} chars/eval</td>
-              <td style={{padding:"10px",fontFamily:"monospace"}}><div style={{display:"flex", alignItems:"center", gap:6}}><div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:q.metNotePct+"%", height:"100%", background:C.purple, borderRadius:2}}/></div><span>{q.metNotePct}%</span></div></td>
+              <td style={{padding:"10px",fontFamily:"monospace"}}><div style={{display:"flex", alignItems:"center", gap:6}}><div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:q.metNotePct+"%", height:"100%", background:C.purple, borderRadius:2}}></div></div><span>{q.metNotePct}%</span></div></td>
               <td style={{padding:"10px",fontFamily:"monospace", color:C.dim}}>{q.commentsCount} notes</td>
             </>}
             {view === "ops" && <>
@@ -1538,14 +1536,15 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>QA Impact on CSAT — Which behaviors drive customer satisfaction?</div>
       {csatData.categoryImpact.map((c,i)=>{
         const w=Math.max(5,Math.abs(c.correlation)*100); const clr=c.correlation>0.3?C.green:c.correlation>0.1?C.teal:C.dim;
-        return <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}><span style={{fontSize:10,color:C.dim,width:100,textAlign:"right"}}>{c.name}</span><div style={{flex:1,height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}><div style={{width:w+"%",height:"100%",borderRadius:4,background:clr,transition:"width .3s"}}/></div><span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:clr,width:40}}>{c.correlation}</span><span style={{fontSize:9,color:C.dim}}>n={c.n}</span></div>;})}
+        return <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}><span style={{fontSize:10,color:C.dim,width:100,textAlign:"right"}}>{c.name}</span><div style={{flex:1,height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}><div style={{width:w+"%",height:"100%",borderRadius:4,background:clr,transition:"width .3s"}}></div></div><span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:clr,width:40}}>{c.correlation}</span><span style={{fontSize:9,color:C.dim}}>n={c.n}</span></div>;})}
     </div>}
     {csatData.findings.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.purple}}>
       <div style={{fontSize:11,fontWeight:600,color:C.purple,marginBottom:8}}>{"📊"} QA-CSAT Insights</div>
       {csatData.findings.slice(0,8).map((f,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<Math.min(csatData.findings.length,8)-1?"1px solid "+C.border+"22":undefined, display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><span style={{fontSize:11,fontWeight:600,cursor:f.agent!=="Campaign"?"pointer":"default"}} onClick={()=>{if(f.agent!=="Campaign"){const t=tls.find(t=>t.agents.some(a=>a.n===f.agent));const a=t?.agents.find(x=>x.n===f.agent);if(a&&t)onSelectAgent(a,t);}}}>{f.agent}</span></div><span style={{fontSize:10,color:f.severity==="critical"?C.red:f.severity==="warning"?C.amber:C.teal}}>{f.msg}</span></div>)}
     </div>}
     <div style={{display:"flex",gap:8,marginBottom:12}}>
-      {[["all","All"],["low","CSAT ≤ 3"],["high","CSAT ≥ 4"]].map(([val,label])=><button key={val} onClick={()=>setCsatFilter(val)} style={{fontSize:10,padding:"4px 12px",borderRadius:4,cursor:"pointer",border:"1px solid "+(csatFilter===val?C.purple:C.border), background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
+      {[["all","All"],["low","CSAT ≤ 3"],["high","CSAT ≥ 4"]].map(([val,label])=>
+        <button key={val} onClick={()=>setCsatFilter(val)} style={{fontSize:10,padding:"4px 12px",borderRadius:4,cursor:"pointer",border:"1px solid "+(csatFilter===val?C.purple:C.border), background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
     </div>
     <div style={{...cs, overflowX: "auto"}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
@@ -1564,7 +1563,7 @@ function LoadingScreen({error,onSetup}){
   return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif", display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
     <div style={{textAlign:"center"}}>
       <div style={{marginBottom:20}}><svg width="48" height="48" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg></div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-0.5px",marginBottom:16}}>Next<span style={{color:"#06b6d4"}}>Skill</span></div>
-      {error?<><p style={{fontSize:12,color:C.red,margin:"0 0 16px",maxWidth:400}}>{error}</p><button onClick={onSetup} style={{padding:"8px 20px",borderRadius:6,border:"1px solid "+C.cyan,background:"transparent",color:C.cyan,fontSize:11,cursor:"pointer"}}>Configure</button></>:<div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}><div style={{width:6,height:6,borderRadius:"50%",background:C.cyan,animation:"pulse 1.5s infinite"}}/><span style={{fontSize:11,color:C.dim,fontFamily:"monospace"}}>Initializing platform...</span></div>}
+      {error?<><p style={{fontSize:12,color:C.red,margin:"0 0 16px",maxWidth:400}}>{error}</p><button onClick={onSetup} style={{padding:"8px 20px",borderRadius:6,border:"1px solid "+C.cyan,background:"transparent",color:C.cyan,fontSize:11,cursor:"pointer"}}>Configure</button></>:<div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}><div style={{width:6,height:6,borderRadius:"50%",background:C.cyan,animation:"pulse 1.5s infinite"}}></div><span style={{fontSize:11,color:C.dim,fontFamily:"monospace"}}>Initializing platform...</span></div>}
     </div>
     <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
   </div>;
@@ -1596,9 +1595,6 @@ function SetupScreen({onDataReady,savedConfig}){
   </div>;
 }
 
-// =================================================================
-// MAIN APPLICATION
-// =================================================================
 export default function NextSkill(){
   const[data,setData]=useState(null);
   const[config,setConfig]=useState(()=>{
@@ -1621,7 +1617,6 @@ export default function NextSkill(){
   const[showSetup,setShowSetup]=useState(false);
   const[showProfile,setShowProfile]=useState(false);
   
-  // NUEVO: Estado para el panel de QAs
   const[selQA, setSelQA] = useState(null);
 
   const[modalInts,setModalInts]=useState(null);
@@ -1724,7 +1719,7 @@ export default function NextSkill(){
             <span style={{fontSize:16,fontWeight:800,letterSpacing:"-0.5px",color:C.text}}>Next<span style={{color:C.cyan}}>Skill</span></span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:wIdx>=LATEST_WIDX?C.green:C.amber,boxShadow:"0 0 6px "+(wIdx>=LATEST_WIDX?C.green:C.amber)+"66"}}/>
+            <div style={{width:6,height:6,borderRadius:"50%",background:wIdx>=LATEST_WIDX?C.green:C.amber,boxShadow:"0 0 6px "+(wIdx>=LATEST_WIDX?C.green:C.amber)+"66"}}></div>
             <span style={{fontSize:8,fontWeight:600,letterSpacing:"1.5px",textTransform:"uppercase",color:wIdx>=LATEST_WIDX?C.green:C.amber}}>{wIdx>=LATEST_WIDX?"Live":"Historical"}</span>
           </div>
         </div>
