@@ -299,7 +299,7 @@ function csatQaCorrelation(tls, surveyData, rawInts) {
 }
 
 // =================================================================
-// NEW FEATURE: Most Improved Agents (Momentum)
+// FEATURE: Most Improved Agents (Momentum)
 // =================================================================
 function getMostImprovedAgents(agents, wIdx) {
   if (wIdx < 1) return [];
@@ -604,7 +604,7 @@ function TabButton({label,active,onClick,badge}){
 }
 
 // =================================================================
-// NEW FEATURE: Quick-Action Command Palette (Ctrl+K)
+// FEATURE: Quick-Action Command Palette (Ctrl+K)
 // =================================================================
 function CommandPalette({ isOpen, onClose, tls, onSelectAgent }) {
   const [cmdSearch, setCmdSearch] = useState("");
@@ -667,7 +667,7 @@ function ScoreGauge({score,size=80}){
 }
 
 // =================================================================
-// INTERACTION MODAL (Fixed Scroll Layout)
+// INTERACTION MODAL (Fixed Scroll Layout & Zoom collision)
 // =================================================================
 function InteractionModal({interactions,onClose}){
   const[idx,setIdx]=useState(0);
@@ -689,9 +689,12 @@ function InteractionModal({interactions,onClose}){
 
   return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
     onClick={onClose}>
+    
+    {/* MAIN CONTAINER: Changed maxHeight to 70vh to prevent zoom overflow */}
     <div onClick={e=>e.stopPropagation()} style={{background:C.panel,borderRadius:16,border:"1px solid "+C.border,
-      maxWidth:680,width:"100%",maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden",padding:0}}>
+      maxWidth:680,width:"100%",maxHeight:"70vh",display:"flex",flexDirection:"column",overflow:"hidden",padding:0}}>
 
+      {/* 1. HEADER (Fixed at top): Added flexShrink: 0 */}
       <div style={{padding:"14px 24px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,flexShrink:0}}>
         <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
           <span style={{fontSize:14,fontWeight:700}}>{int.agent}</span>
@@ -709,7 +712,8 @@ function InteractionModal({interactions,onClose}){
         </div>
       </div>
 
-      <div style={{padding:"20px 24px", flex: 1, overflowY:"auto"}}>
+      {/* 2. BODY (Scrollable Area): Added minHeight: 0 to enforce flexbox scrolling */}
+      <div style={{padding:"20px 24px", flex: 1, overflowY:"auto", minHeight: 0}}>
 
         {interactions.length>1&&<div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
           {interactions.map((it,i)=><button key={i} onClick={()=>{setIdx(i);setExpandedFb({});}}
@@ -1037,7 +1041,6 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
       {profileTab==="history"&&<>
         {agentInts.length>0?<div style={{display:"flex",flexDirection:"column",gap:10}}>
           {agentInts.slice(-8).reverse().map((int,i)=>{
-            // NEW FEATURE: Blind Spot Detector
             const convId = extractConvId(int.url);
             const survey = surveyData?.byConvId?.[convId];
             const isBlindSpot = int.score >= 90 && survey?.rating && survey.rating <= 2;
@@ -1108,7 +1111,6 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
   const initials=(name)=>{const p=name.split(" ");return(p[0]?.[0]||"")+(p[p.length-1]?.[0]||"");};
   const siteColors={HMO:"#3b82f6",JAM:"#a78bfa",PAN:"#f59e0b"};
   
-  // NEW FEATURE: Momentum Logic
   const mostImproved = getMostImprovedAgents(allAgents, wIdx);
 
   return <div>
@@ -1152,7 +1154,6 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
           </div>
         </div>
         
-        {/* NEW FEATURE: Momentum Board UI */}
         {mostImproved.length > 0 && (
           <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
             <div style={{fontSize:10,color:"#6ee7b7",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>🔥 Most Improved Agents</div>
