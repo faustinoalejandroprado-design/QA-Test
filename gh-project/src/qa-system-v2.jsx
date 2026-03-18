@@ -753,6 +753,8 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
   const catDeductions = {};
   SCS.forEach(c => catDeductions[c] = { deducts: 0, total: 0 });
 
+  let qaProcTotal = 0, qaProcFails = 0, qaNotesTotal = 0, qaNotesFails = 0;
+
   qaInts.forEach(int => {
     totalScore += int.score;
     if(int.score < 50) criticalFails++;
@@ -770,6 +772,9 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
         if (val !== "Met" && val !== "Exceed") catDeductions[c].deducts++;
       }
     });
+
+    if (int.proc !== null) { qaProcTotal++; if (!int.proc) qaProcFails++; }
+    if (int.notes !== null) { qaNotesTotal++; if (!int.notes) qaNotesFails++; }
   });
 
   const avgScore = +(totalScore / qaInts.length).toFixed(1);
@@ -779,6 +784,9 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
 
   const teamDeductions = {};
   SCS.forEach(c => teamDeductions[c] = { deducts: 0, total: 0 });
+  
+  let teamProcTotal = 0, teamProcFails = 0, teamNotesTotal = 0, teamNotesFails = 0;
+
   allWeekInts.forEach(int => {
      SCS.forEach(c => {
        const val = int.sc?.[c];
@@ -787,6 +795,9 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
          if (val !== "Met" && val !== "Exceed") teamDeductions[c].deducts++;
        }
      });
+
+     if (int.proc !== null) { teamProcTotal++; if (!int.proc) teamProcFails++; }
+     if (int.notes !== null) { teamNotesTotal++; if (!int.notes) teamNotesFails++; }
   });
 
   const radarData = SCS.map(c => {
@@ -794,6 +805,11 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
     const teamRate = teamDeductions[c].total > 0 ? Math.round((teamDeductions[c].deducts / teamDeductions[c].total)*100) : 0;
     return { subject: SC_FULL[c], "QA Deduction %": qaRate, "Team Avg %": teamRate };
   });
+
+  const qaProcRate = qaProcTotal > 0 ? Math.round((qaProcFails / qaProcTotal) * 100) : 0;
+  const teamProcRate = teamProcTotal > 0 ? Math.round((teamProcFails / teamProcTotal) * 100) : 0;
+  const qaNotesRate = qaNotesTotal > 0 ? Math.round((qaNotesFails / qaNotesTotal) * 100) : 0;
+  const teamNotesRate = teamNotesTotal > 0 ? Math.round((teamNotesFails / teamNotesTotal) * 100) : 0;
 
   const parts = qaName.split(" ");
   const ini = (parts[0]?.[0]||"")+(parts[parts.length-1]?.[0]||"");
@@ -844,6 +860,38 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
                 <Tooltip contentStyle={{background:C.panel, border:"1px solid "+C.border, fontSize:10}} />
               </RadarChart>
             </ResponsiveContainer>
+         </div>
+         
+         <div style={{...cs, marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Process & Compliance Deduction Bias</div>
+            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:16}}>
+              <div>
+                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600}}>Follows Procedures</div>
+                <div style={{display:"flex", gap:8, alignItems:"center", marginBottom:4}}>
+                  <span style={{fontSize:9, color:C.red, width:24}}>QA</span>
+                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:qaProcRate+"%", background:C.red, height:"100%", borderRadius:3}}></div></div>
+                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.red}}>{qaProcRate}%</span>
+                </div>
+                <div style={{display:"flex", gap:8, alignItems:"center"}}>
+                  <span style={{fontSize:9, color:C.cyan, width:24}}>Team</span>
+                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:teamProcRate+"%", background:C.cyan, height:"100%", borderRadius:3}}></div></div>
+                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.cyan}}>{teamProcRate}%</span>
+                </div>
+              </div>
+              <div>
+                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600}}>Notes in Gladly</div>
+                <div style={{display:"flex", gap:8, alignItems:"center", marginBottom:4}}>
+                  <span style={{fontSize:9, color:C.red, width:24}}>QA</span>
+                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:qaNotesRate+"%", background:C.red, height:"100%", borderRadius:3}}></div></div>
+                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.red}}>{qaNotesRate}%</span>
+                </div>
+                <div style={{display:"flex", gap:8, alignItems:"center"}}>
+                  <span style={{fontSize:9, color:C.cyan, width:24}}>Team</span>
+                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:teamNotesRate+"%", background:C.cyan, height:"100%", borderRadius:3}}></div></div>
+                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.cyan}}>{teamNotesRate}%</span>
+                </div>
+              </div>
+            </div>
          </div>
       </>}
 
@@ -1543,8 +1591,7 @@ function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
       {csatData.findings.slice(0,8).map((f,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<Math.min(csatData.findings.length,8)-1?"1px solid "+C.border+"22":undefined, display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><span style={{fontSize:11,fontWeight:600,cursor:f.agent!=="Campaign"?"pointer":"default"}} onClick={()=>{if(f.agent!=="Campaign"){const t=tls.find(t=>t.agents.some(a=>a.n===f.agent));const a=t?.agents.find(x=>x.n===f.agent);if(a&&t)onSelectAgent(a,t);}}}>{f.agent}</span></div><span style={{fontSize:10,color:f.severity==="critical"?C.red:f.severity==="warning"?C.amber:C.teal}}>{f.msg}</span></div>)}
     </div>}
     <div style={{display:"flex",gap:8,marginBottom:12}}>
-      {[["all","All"],["low","CSAT ≤ 3"],["high","CSAT ≥ 4"]].map(([val,label])=>
-        <button key={val} onClick={()=>setCsatFilter(val)} style={{fontSize:10,padding:"4px 12px",borderRadius:4,cursor:"pointer",border:"1px solid "+(csatFilter===val?C.purple:C.border), background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
+      {[["all","All"],["low","CSAT ≤ 3"],["high","CSAT ≥ 4"]].map(([val,label])=><button key={val} onClick={()=>setCsatFilter(val)} style={{fontSize:10,padding:"4px 12px",borderRadius:4,cursor:"pointer",border:"1px solid "+(csatFilter===val?C.purple:C.border), background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
     </div>
     <div style={{...cs, overflowX: "auto"}}>
       <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
