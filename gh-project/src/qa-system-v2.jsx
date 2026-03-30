@@ -955,6 +955,105 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
 }
 
 // =================================================================
+// NUEVO: TL PROFILE PANEL (Deep Dive for Team Leads)
+// =================================================================
+function TLProfilePanel({ tl, wIdx, onClose, isMobile }) {
+  if (!tl) return null;
+  const scored = tl.agents.filter(a => a.w[wIdx] != null);
+  const avg = scored.length ? +(scored.reduce((s, a) => s + a.w[wIdx], 0) / scored.length).toFixed(1) : 0;
+  const trend = wowDelta(tl.agents, wIdx);
+  const atGoal = scored.filter(a => a.w[wIdx] >= GOAL).length;
+  const pctGoal = scored.length ? Math.round((atGoal / scored.length) * 100) : 0;
+  
+  const criticals = tl.agents.filter(a => classify(a, wIdx).cat === "Critical");
+  const convertibles = tl.agents.filter(a => classify(a, wIdx).cat === "Convertible");
+
+  const trendData = WEEKS.map((wk, i) => {
+    const s = tl.agents.filter(a => a.w[i] != null);
+    return { wk, score: s.length ? +(s.reduce((sum, a) => sum + a.w[i], 0) / s.length).toFixed(1) : null };
+  }).filter(d => d.score != null);
+
+  const scAvgs = SCS.map(c => {
+    const vals = tl.agents.map(a => a.sc[c]).filter(v => v != null);
+    return { code: c, name: SC_FULL[c], val: vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : 0 };
+  });
+  const topStrengths = [...scAvgs].sort((a, b) => b.val - a.val).slice(0, 3);
+  const topOpps = [...scAvgs].sort((a, b) => a.val - b.val).slice(0, 3);
+
+  const initials = (tl.name.split(" ")[0]?.[0] || "") + (tl.name.split(" ")[tl.name.split(" ").length - 1]?.[0] || "");
+
+  return <div style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:0, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
+    <div style={{padding:"20px 24px 20px", borderBottom:"1px solid "+C.border}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:42,height:42,borderRadius:"50%",background:C.orange+"20",border:"2px solid "+C.orange+"44", display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700,color:C.orange}}>{initials}</div>
+          <div>
+            <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>Leadership Profile</div>
+            <h2 style={{fontSize:17,fontWeight:700,margin:"2px 0 0"}}>{tl.name}</h2>
+            <div style={{fontSize:10,color:C.dim,marginTop:1}}>{tl.site} {"·"} {tl.agents.length} Agents</div>
+          </div>
+        </div>
+        <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer"}}>{"✕"}</button>
+      </div>
+    </div>
+
+    <div style={{padding:"16px 24px 24px"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        <div style={{...cs, padding:12, borderColor: avg >= GOAL ? C.green+"44" : C.border, background: avg >= GOAL ? C.green+"08" : C.card}}>
+          <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Team Avg Score</div>
+          <div style={{display:"flex", alignItems:"flex-end", gap:8, marginTop:4}}>
+            <span style={{fontSize:26, fontWeight:800, color: avg >= GOAL ? C.green : C.text, fontFamily:"monospace", lineHeight:1}}>{avg}</span>
+            {trend != null && <WoWBadge delta={trend} />}
+          </div>
+        </div>
+        <div style={{...cs, padding:12}}>
+          <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Goal Attainment</div>
+          <div style={{fontSize:26, fontWeight:800, color:C.text, fontFamily:"monospace", lineHeight:1, marginTop:4}}>{pctGoal}%</div>
+          <div style={{fontSize:9, color:C.dim, marginTop:4}}>{atGoal} of {scored.length} agents {"≥"} {GOAL}</div>
+        </div>
+      </div>
+
+      <div style={{...cs, marginBottom:16}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Team Historical Trend</div>
+        <ResponsiveContainer width="100%" height={140}>
+          <AreaChart data={trendData}>
+            <defs><linearGradient id="tlGr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.orange} stopOpacity={0.2}/><stop offset="100%" stopColor={C.orange} stopOpacity={0.01}/></linearGradient></defs>
+            <CartesianGrid stroke={C.border+"40"} strokeDasharray="3 3"/>
+            <XAxis dataKey="wk" tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false}/>
+            <YAxis domain={[0,100]} tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false} width={26}/>
+            <ReferenceLine y={GOAL} stroke={C.green+"55"} strokeDasharray="4 4"/>
+            <Area type="monotone" dataKey="score" stroke={C.orange} fill="url(#tlGr)" strokeWidth={2} dot={{r:3,fill:C.orange}}/>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
+        <div style={{...cs, borderLeft:"3px solid "+C.green}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8}}>Top Strengths</div>
+          {topStrengths.map((s,i) => <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:4}}><span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:110}}>{s.name}</span><span style={{fontWeight:700,fontFamily:"monospace",color:C.green}}>{s.val}%</span></div>)}
+        </div>
+        <div style={{...cs, borderLeft:"3px solid "+C.red}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8}}>Team Bottlenecks</div>
+          {topOpps.map((s,i) => <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:4}}><span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:110}}>{s.name}</span><span style={{fontWeight:700,fontFamily:"monospace",color:C.red}}>{s.val}%</span></div>)}
+        </div>
+      </div>
+
+      <div style={{...cs}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Agent Distribution</div>
+        <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, paddingBottom:8, borderBottom:"1px solid "+C.border+"55"}}>
+          <div style={{fontSize:10}}><span style={{color:C.red, fontWeight:700}}>● Criticals:</span> {criticals.length}</div>
+          <div style={{fontSize:10}}><span style={{color:C.cyan, fontWeight:700}}>● Convertibles:</span> {convertibles.length}</div>
+        </div>
+        {criticals.length > 0 && <div style={{fontSize:10, color:C.dim, marginTop:8}}>
+          <span style={{color:C.text, fontWeight:600}}>At Risk: </span> 
+          {criticals.map(a=>a.n).join(", ")}
+        </div>}
+      </div>
+    </div>
+  </div>;
+}
+
+// =================================================================
 // AGENT PROFILE PANEL (El original)
 // =================================================================
 function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction,isMobile}){
@@ -1152,6 +1251,76 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
           </div>;})}
         </div>:<EmptyState message="No evaluations found for this agent"/>}
       </>}
+    </div>
+  </div>;
+}
+
+// =================================================================
+// NUEVO: LEADERSHIP TAB (TL Analytics Overview)
+// =================================================================
+function LeadershipTab({ tls, wIdx, onSelectLeader }) {
+  const leadSort = useSort("avg");
+  
+  const tlStats = tls.map(tl => {
+    const scored = tl.agents.filter(a => a.w[wIdx] != null);
+    const avg = scored.length ? +(scored.reduce((s, a) => s + a.w[wIdx], 0) / scored.length).toFixed(1) : 0;
+    const trend = wowDelta(tl.agents, wIdx);
+    const atGoal = scored.filter(a => a.w[wIdx] >= GOAL).length;
+    const pctGoal = scored.length ? Math.round((atGoal / scored.length) * 100) : 0;
+    const criticals = tl.agents.filter(a => classify(a, wIdx).cat === "Critical").length;
+    return { ...tl, avg, trend, pctGoal, criticals, scoredCount: scored.length };
+  }).filter(t => t.scoredCount > 0);
+
+  const bestTL = [...tlStats].sort((a,b) => b.avg - a.avg)[0];
+  const mostImprovedTL = [...tlStats].filter(t => t.trend != null).sort((a,b) => b.trend - a.trend)[0];
+
+  const barData = [...tlStats].sort((a,b) => b.avg - a.avg).map(t => ({ name: t.name.split(" ")[0], fullName: t.name, avg: t.avg, fill: t.avg >= GOAL ? C.green : t.avg >= 60 ? C.amber : C.red }));
+
+  return <div>
+    <HistoricalBanner wIdx={wIdx}/>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={tlStats.length} label="Active Leaders" color={C.orange} icon={"👥"}/>
+      <KpiCard value={bestTL ? bestTL.avg : "--"} label="Top Performing TL" sub={bestTL ? bestTL.name : ""} color={C.green} icon={"🏆"}/>
+      <KpiCard value={mostImprovedTL && mostImprovedTL.trend > 0 ? "+"+mostImprovedTL.trend : "--"} label="Most Improved TL" sub={mostImprovedTL ? mostImprovedTL.name : ""} color={C.cyan} icon={"🚀"}/>
+    </div>
+
+    <div style={{...cs, marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:16}}>Leadership Performance Ranking</div>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={barData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+          <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3" vertical={false}/>
+          <XAxis dataKey="name" tick={{fontSize:10,fill:C.dim}} axisLine={false} tickLine={false}/>
+          <YAxis domain={[0,100]} tick={{fontSize:10,fill:C.dim}} axisLine={false} tickLine={false}/>
+          <Tooltip cursor={{fill:C.border+"33"}} contentStyle={{background:C.panel, border:"1px solid "+C.border, fontSize:11, borderRadius:8}}/>
+          <ReferenceLine y={GOAL} stroke={C.green+"66"} strokeDasharray="4 4" label={{value:`Goal ${GOAL}`, position:"insideTopLeft", fill:C.green, fontSize:10}} />
+          <Bar dataKey="avg" radius={[4,4,0,0]} name="Team Avg">
+            {barData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+
+    <div style={{...cs, overflowX: "auto"}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Team Leader Matrix</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "600px"}}>
+        <SortHeader columns={[["name","Team Leader"],["site","Site",80],["scoredCount","Agents",80],["avg","Team Avg",100],["trend","WoW Trend",100],["pctGoal","% At Goal",100],["criticals","Criticals",100]]} sortKey={leadSort.sk} sortDir={leadSort.sd} onSort={leadSort.toggle}/>
+        <tbody>{tlStats.sort((a,b)=>leadSort.sortFn(a[leadSort.sk],b[leadSort.sk])).map((t,i) => (
+          <tr key={i} onClick={() => onSelectLeader(t)} style={{borderBottom:"1px solid "+C.border+"22", cursor:"pointer", transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=C.orange+"0a"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <td style={{padding:"10px 12px",fontWeight:600, color:C.text}}>{t.name}</td>
+            <td style={{padding:"10px 12px", color:C.dim}}>{t.site}</td>
+            <td style={{padding:"10px 12px", fontFamily:"monospace", color:C.dim}}>{t.scoredCount}</td>
+            <td style={{padding:"10px 12px", fontWeight:800, fontFamily:"monospace", color: t.avg >= GOAL ? C.green : t.avg >= 60 ? C.amber : C.red}}>{t.avg}</td>
+            <td style={{padding:"10px 12px"}}>{t.trend != null && <WoWBadge delta={t.trend}/>}</td>
+            <td style={{padding:"10px 12px", fontFamily:"monospace"}}>
+              <div style={{display:"flex", alignItems:"center", gap:6}}>
+                <div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:t.pctGoal+"%", height:"100%", background:C.cyan, borderRadius:2}}></div></div>
+                <span>{t.pctGoal}%</span>
+              </div>
+            </td>
+            <td style={{padding:"10px 12px", fontFamily:"monospace", color: t.criticals > 2 ? C.red : C.dim}}>{t.criticals} {t.criticals > 2 && "⚠"}</td>
+          </tr>
+        ))}</tbody>
+      </table>
     </div>
   </div>;
 }
@@ -1665,6 +1834,7 @@ export default function NextSkill(){
   const[showProfile,setShowProfile]=useState(false);
   
   const[selQA, setSelQA] = useState(null);
+  const[selLeaderDetail, setSelLeaderDetail] = useState(null);
 
   const[modalInts,setModalInts]=useState(null);
   const[search,setSearch]=useState("");
@@ -1709,6 +1879,7 @@ export default function NextSkill(){
     setTab(newTab);
     if (newTab !== "dashboard") setShowProfile(false); 
     if (newTab !== "qa") setSelQA(null);
+    if (newTab !== "leadership") setSelLeaderDetail(null);
   };
 
   if(data&&data!==D){D=data;WEEKS=D.weeks;LATEST_WIDX=WEEKS.length-1;}
@@ -1792,10 +1963,9 @@ export default function NextSkill(){
       </div>
       <div style={{display:"flex",gap:4,marginTop:12, overflowX:"auto"}}>
         <TabButton label="Dashboard" active={tab==="dashboard"} onClick={()=>changeTab("dashboard")}/>
+        <TabButton label="Leadership" active={tab==="leadership"} onClick={()=>changeTab("leadership")}/>
         <TabButton label="Coaching" active={tab==="coaching"} onClick={()=>changeTab("coaching")} badge={alerts.filter(a=>a.severity==="high").length}/>
-        
         {isGodMode && <TabButton label="QA Analytics" active={tab==="qa"} onClick={()=>changeTab("qa")}/>}
-        
         <TabButton label="Intelligence" active={tab==="intel"} onClick={()=>changeTab("intel")}/>
       </div>
     </div>
@@ -1822,6 +1992,9 @@ export default function NextSkill(){
         {tab==="dashboard"&&(selAgent?<AgentView agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx}/>:
           selTL?<TLView tl={selTL} wIdx={wIdx} onSelectAgent={a=>onSelectAgent(a,selTL)} isMobile={isMobile}/>:
           <CampaignView wIdx={wIdx} onSelectTL={onSelectTL} onSelectAgent={onSelectAgent} catFilter={catFilter} setCatFilter={setCatFilter} csatFindings={csatData.findings} site={site} filteredTLs={filteredTLs} isMobile={isMobile}/>)}
+        
+        {tab==="leadership"&&<LeadershipTab tls={filteredTLs} wIdx={wIdx} onSelectLeader={setSelLeaderDetail}/>}
+        
         {tab==="coaching"&&<CoachingTab alerts={alerts} wIdx={wIdx} onSelectAgent={onSelectAgent} tls={D.tls}/>}
         {tab==="qa"&&<QAAnalyticsTab wIdx={wIdx} onSelectQA={setSelQA}/>}
         {tab==="intel"&&<IntelligenceTab csatData={csatData} surveyData={D.surveyData} onSelectAgent={onSelectAgent} tls={D.tls}/>}
@@ -1830,6 +2003,8 @@ export default function NextSkill(){
       {showProfile&&selAgent&&<AgentProfilePanel agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx} interactions={D.rawInts} surveyData={D.surveyData} csatData={csatData} weekISO={D.weekISO} onClose={()=>{setShowProfile(false);window.history.back();}} onViewInteraction={ints=>setModalInts(ints)} isMobile={isMobile}/>}
       
       {tab==="qa"&&selQA&&<QAProfilePanel qaName={selQA} wIdx={wIdx} rawInts={D.rawInts} onClose={()=>setSelQA(null)} onViewInteraction={ints=>setModalInts(ints)} isMobile={isMobile} />}
+      
+      {tab==="leadership"&&selLeaderDetail&&<TLProfilePanel tl={selLeaderDetail} wIdx={wIdx} onClose={()=>setSelLeaderDetail(null)} isMobile={isMobile} />}
     </div>
 
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
