@@ -736,10 +736,11 @@ function InteractionModal({interactions,onClose}){
 }
 
 // =================================================================
-// NUEVO: QA PROFILE PANEL (Deep Dive for Evaluators)
+// NUEVO: QA PROFILE PANEL (Deep Dive for Evaluators) - CON KEYWORDS
 // =================================================================
 function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMobile}) {
   const [tab, setTab] = useState("bias");
+  const [fbFilter, setFbFilter] = useState("All");
   
   const targetWeek = D.weekISO[wIdx];
   const allWeekInts = (rawInts || []).filter(int => getWeekStart(int.date) === targetWeek);
@@ -762,7 +763,25 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
     if (int.duration >= 1 && int.duration <= 120) { totalValidMins += int.duration; validEvals++; }
     
     Object.entries(int.comments || {}).forEach(([qText, text]) => {
-      if(text.trim()) allComments.push({ agent: int.agent, text: text.trim(), length: text.trim().length, date: int.date, score: int.score });
+      if(text.trim()) {
+        const code = SC_MAP[qText];
+        let isDeduction = false;
+        let category = "Other";
+
+        if (code) {
+          category = SC_FULL[code];
+          const val = int.sc?.[code];
+          if (val && val !== "Met" && val !== "Exceed") isDeduction = true;
+        } else if (qText === "Follows Procedures") {
+          category = "Follows Procedures";
+          if (int.proc === false) isDeduction = true;
+        } else if (qText.includes("Notes in Gladly")) {
+          category = "Notes in Gladly";
+          if (int.notes === false) isDeduction = true;
+        }
+
+        allComments.push({ agent: int.agent, text: text.trim(), length: text.trim().length, date: int.date, score: int.score, qText, category, isDeduction });
+      }
     });
 
     SCS.forEach(c => {
@@ -795,7 +814,6 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
          if (val !== "Met" && val !== "Exceed") teamDeductions[c].deducts++;
        }
      });
-
      if (int.proc !== null) { teamProcTotal++; if (!int.proc) teamProcFails++; }
      if (int.notes !== null) { teamNotesTotal++; if (!int.notes) teamNotesFails++; }
   });
@@ -815,6 +833,54 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
   const ini = (parts[0]?.[0]||"")+(parts[parts.length-1]?.[0]||"");
 
   const tabSt=(t)=>({fontSize:11,fontWeight:tab===t?700:500,padding:"8px 16px",cursor:"pointer", color:tab===t?C.purple:C.dim,borderBottom:tab===t?"2px solid "+C.purple:"2px solid transparent", background:"none",border:"none",transition:"all .15s"});
+
+  const goToFeedback = (category) => {
+    setFbFilter(category);
+    setTab("feedback");
+  };
+
+  const displayedComments = fbFilter === "All" 
+    ? allComments 
+    : allComments.filter(c => c.category === fbFilter && c.isDeduction);
+
+  const availableCategories = ["All", ...new Set(allComments.filter(c => c.isDeduction).map(c => c.category))];
+
+  const ClickableTick = (props) => {
+    const { x, y, payload, textAnchor } = props;
+    return (
+      <text x={x} y={y} textAnchor={textAnchor} fill={C.dim} fontSize={9} 
+        style={{cursor:"pointer", transition:"all 0.2s"}} 
+        onMouseEnter={e=>{e.target.style.fill=C.purple; e.target.style.fontWeight="bold";}} 
+        onMouseLeave={e=>{e.target.style.fill=C.dim; e.target.style.fontWeight="normal";}} 
+        onClick={() => goToFeedback(payload.value)}>
+        {payload.value}
+      </text>
+    );
+  };
+
+  const getTopKeywords = (commentsArray) => {
+    if (!commentsArray || commentsArray.length === 0) return [];
+    const stopWords = new Set(["the","be","to","of","and","a","in","that","have","i","it","for","not","on","with","he","as","you","do","at","this","but","his","by","from","they","we","say","her","she","or","an","will","my","one","all","would","there","their","what","so","up","out","if","about","who","get","which","go","me","when","make","can","like","time","no","just","him","know","take","people","into","year","your","good","some","could","them","see","other","than","then","now","look","only","come","its","over","think","also","back","after","use","two","how","our","work","first","well","way","even","new","want","because","any","these","give","day","most","us","de","la","que","el","en","y","a","los","del","se","las","por","un","para","con","no","una","su","al","lo","como","más","pero","sus","le","ya","o","este","sí","porque","esta","entre","cuando","muy","sin","sobre","también","me","hasta","hay","donde","quien","desde","todo","nos","durante","todos","uno","les","ni","contra","otros","ese","eso","ante","ellos","e","esto","mí","antes","algunos","qué","unos","yo","otro","otras","otra","él","tanto","esa","estos","mucho","quienes","nada","muchos","cual","poco","ella","estar","estas","algunas","algo","nosotros","mi","mis","tú","te","ti","tu","tus","ellas","nosotras","vosotros","vosotras","os","mío","mía","míos","mías","tuyo","tuya","tuyos","tuyas","suyo","suya","suyos","suyas","nuestro","nuestra","nuestros","nuestras","vuestro","vuestra","vuestros","vuestras","esos","esas","estoy","estás","está","estamos","estáis","están","esté","estés","estemos","estéis","estén","estaré","estarás","estará","estaremos","estaréis","estarán","estaría","estarías","estaríamos","estaríais","estarían","estaba","estabas","estábamos","estabais","estaban","estuve","estuviste","estuvimos","estuvisteis","estuvieron","estuviera","estuvieras","estuviéramos","estubierais","estuvieran","estuviese","estuvieses","estuviésemos","estuvieseis","estuviesen","estando","estado","estada","estados","estadas","estad","he","has","ha","hemos","habéis","han","haya","hayas","hayamos","hayáis","hayan","habré","habrás","habrá","habremos","habréis","habrán","habría","habrías","habríamos","habríais","habrían","había","habías","habíamos","habíais","habían","hube","hubiste","hubo","hubimos","hubisteis","hubieron","hubiera","hubieras","hubiéramos","hubierais","hubieran","hubiese","hubieses","hubiésemos","hubieseis","hubiesen","habiendo","habido","habida","habidos","habidas","soy","eres","es","somos","sois","son","sea","seas","seamos","seáis","sean","seré","serás","será","serremos","seréis","serán","sería","serías","seríamos","seríais","serían","era","eras","éramos","erais","eran","fui","fuiste","fue","fuimos","fuisteis","fueron","fuera","fueras","fuéramos","fuerais","fueran","fuese","fueses","fuésemos","fueseis","fuesen","siendo","sido","tengo","tienes","tiene","tenemos","tenéis","tienen","tenga","tengas","tengamos","tengáis","tengan","tendré","tendrás","tendrá","tendremos","tendréis","tendrán","tendría","tendrías","tendríamos","tendríais","tendrían","tenía","tenías","teníamos","teníais","tenían","tuve","tuviste","tuvo","tuvimos","tuvisteis","tuvieron","tuviera","tuvieras","tuviéramos","tuvierais","tuvieran","tuviese","tuvieses","tuviésemos","tuvieseis","tuviesen","teniendo","tenido","tenida","tenidos","tenidas","tened","customer","client","agente","agent","call","llamada","interaction","interaccion","interact","conversation","did","was","were","is","are","has","had"]);
+
+    const wordCounts = {};
+    commentsArray.forEach(c => {
+      if (c.isDeduction) {
+        const words = c.text.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g,"").split(/\s+/);
+        words.forEach(w => {
+          if (w.length > 3 && !stopWords.has(w)) {
+            wordCounts[w] = (wordCounts[w] || 0) + 1;
+          }
+        });
+      }
+    });
+
+    return Object.entries(wordCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 7)
+      .map(entry => ({ word: entry[0], count: entry[1] }));
+  };
+
+  const topKeywords = getTopKeywords(displayedComments);
 
   return <div style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:0, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
     <div style={{padding:"20px 24px 0",borderBottom:"1px solid "+C.border}}>
@@ -847,13 +913,17 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
                <div style={{fontSize:24, fontWeight:800, color:C.text, fontFamily:"monospace", marginTop:4}}>{qaInts.length}</div>
             </div>
          </div>
+         
          <div style={{...cs, marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Deduction Bias Radar (vs Team)</div>
+            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.dim}}>Deduction Bias Radar</div>
+              <div style={{fontSize:8,color:C.purple, background:C.purple+"15", padding:"2px 6px", borderRadius:4}}>💡 Click a label to view comments</div>
+            </div>
             <ResponsiveContainer width="100%" height={240}>
               <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
                 <PolarGrid stroke={C.border} />
-                <PolarAngleAxis dataKey="subject" tick={{fill: C.dim, fontSize: 8}} />
-                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{fontSize:8}} />
+                <PolarAngleAxis dataKey="subject" tick={<ClickableTick />} />
+                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{fontSize:8, fill:C.muted}} />
                 <Radar name="QA Deduction %" dataKey="QA Deduction %" stroke={C.red} fill={C.red} fillOpacity={0.4} />
                 <Radar name="Team Avg %" dataKey="Team Avg %" stroke={C.cyan} fill={C.cyan} fillOpacity={0.2} />
                 <Legend wrapperStyle={{fontSize: 10}} />
@@ -865,8 +935,10 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
          <div style={{...cs, marginBottom:16}}>
             <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Process & Compliance Deduction Bias</div>
             <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:16}}>
-              <div>
-                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600}}>Follows Procedures</div>
+              <div onClick={() => goToFeedback("Follows Procedures")} style={{cursor:"pointer", padding:"6px", borderRadius:6, transition:"background 0.2s", margin:"-6px"}} onMouseEnter={e=>e.currentTarget.style.background=C.purple+"15"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600, display:"flex", justifyContent:"space-between"}}>
+                  Follows Procedures <span style={{fontSize:9, color:C.purple}}>🔍 View</span>
+                </div>
                 <div style={{display:"flex", gap:8, alignItems:"center", marginBottom:4}}>
                   <span style={{fontSize:9, color:C.red, width:24}}>QA</span>
                   <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:qaProcRate+"%", background:C.red, height:"100%", borderRadius:3}}></div></div>
@@ -878,8 +950,11 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
                   <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.cyan}}>{teamProcRate}%</span>
                 </div>
               </div>
-              <div>
-                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600}}>Notes in Gladly</div>
+              
+              <div onClick={() => goToFeedback("Notes in Gladly")} style={{cursor:"pointer", padding:"6px", borderRadius:6, transition:"background 0.2s", margin:"-6px"}} onMouseEnter={e=>e.currentTarget.style.background=C.purple+"15"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600, display:"flex", justifyContent:"space-between"}}>
+                  Notes in Gladly <span style={{fontSize:9, color:C.purple}}>🔍 View</span>
+                </div>
                 <div style={{display:"flex", gap:8, alignItems:"center", marginBottom:4}}>
                   <span style={{fontSize:9, color:C.red, width:24}}>QA</span>
                   <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:qaNotesRate+"%", background:C.red, height:"100%", borderRadius:3}}></div></div>
@@ -896,19 +971,48 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
       </>}
 
       {tab === "feedback" && <>
-         <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Recent Feedback Left ({allComments.length})</div>
-         {allComments.length > 0 ? <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {allComments.slice(0, 20).map((c, i) => {
+         <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>
+           {fbFilter === "All" ? `Recent Feedback Left (${allComments.length})` : `Deduction Filter: ${fbFilter} (${displayedComments.length})`}
+         </div>
+         
+         <div style={{display:"flex", gap:6, marginBottom:12, overflowX:"auto", paddingBottom:4}}>
+           {availableCategories.map(cat => (
+             <button key={cat} onClick={() => setFbFilter(cat)} 
+               style={{fontSize:9, padding:"4px 10px", borderRadius:12, whiteSpace:"nowrap", cursor:"pointer", border: fbFilter === cat ? "1px solid "+C.purple : "1px solid "+C.border, background: fbFilter === cat ? C.purple+"15" : C.bg, color: fbFilter === cat ? C.purple : C.dim, fontWeight: fbFilter === cat ? 700 : 500}}>
+               {cat}
+             </button>
+           ))}
+         </div>
+
+         {topKeywords.length > 0 && (
+           <div style={{marginBottom:16, padding:"12px 14px", background:C.purple+"08", border:"1px solid "+C.purple+"22", borderRadius:8}}>
+             <div style={{fontSize:10, fontWeight:700, color:C.purple, textTransform:"uppercase", marginBottom:8, letterSpacing:0.5}}>
+               🎯 Top Deduction Keywords
+             </div>
+             <div style={{display:"flex", flexWrap:"wrap", gap:8}}>
+               {topKeywords.map((kw, i) => (
+                 <div key={i} style={{display:"flex", alignItems:"center", background:C.panel, border:"1px solid "+C.border, borderRadius:6, padding:"2px 8px", fontSize:10}}>
+                   <span style={{color:C.text, marginRight:6}}>{kw.word}</span>
+                   <span style={{color:C.purple, fontWeight:700, fontFamily:"monospace"}}>{kw.count}</span>
+                 </div>
+               ))}
+             </div>
+           </div>
+         )}
+
+         {displayedComments.length > 0 ? <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {displayedComments.slice(0, 30).map((c, i) => {
                const isPoor = c.length < 30;
                return <div key={i} style={{...cs, padding:12, borderLeft: isPoor ? "3px solid "+C.red : "3px solid "+C.green}}>
                   <div style={{display:"flex", justifyContent:"space-between", marginBottom:6}}>
-                     <span style={{fontSize:10, fontWeight:700, color:C.text}}>To: {c.agent}</span>
+                     <span style={{fontSize:10, fontWeight:700, color:C.text}}>To: {c.agent} <span style={{color:C.dim, fontWeight:400, marginLeft:4}}>({c.score})</span></span>
                      <span style={{fontSize:9, padding:"2px 6px", borderRadius:4, background: isPoor?C.red+"1a":C.green+"1a", color:isPoor?C.red:C.green}}>{c.length} chars {isPoor?"(Poor)":"(Good)"}</span>
                   </div>
+                  {fbFilter === "All" && c.isDeduction && <div style={{fontSize:8, color:C.purple, marginBottom:4, fontWeight:600}}>DEDUCTION: {c.category}</div>}
                   <div style={{fontSize:11, color:C.dim, fontStyle:"italic", lineHeight:1.4}}>"{c.text}"</div>
                </div>
             })}
-         </div> : <EmptyState message="No comments left this week" />}
+         </div> : <EmptyState message={fbFilter === "All" ? "No comments left this week" : `No deduction comments found for ${fbFilter}`} />}
       </>}
 
       {tab === "ops" && <>
@@ -957,7 +1061,7 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
 // =================================================================
 // NUEVO: TL PROFILE PANEL (Deep Dive for Team Leads)
 // =================================================================
-function TLProfilePanel({ tl, wIdx, onClose, isMobile }) {
+function TLProfilePanel({ tl, wIdx, rawInts, onClose, isMobile }) {
   if (!tl) return null;
   const scored = tl.agents.filter(a => a.w[wIdx] != null);
   const avg = scored.length ? +(scored.reduce((s, a) => s + a.w[wIdx], 0) / scored.length).toFixed(1) : 0;
@@ -980,6 +1084,10 @@ function TLProfilePanel({ tl, wIdx, onClose, isMobile }) {
   const topStrengths = [...scAvgs].sort((a, b) => b.val - a.val).slice(0, 3);
   const topOpps = [...scAvgs].sort((a, b) => a.val - b.val).slice(0, 3);
 
+  const targetWeek = D.weekISO[wIdx];
+  const tlEvals = (rawInts || []).filter(int => getWeekStart(int.date) === targetWeek && tl.agents.some(a => a.n === int.agent || a.email === int.email));
+  const evalsCount = tlEvals.length;
+
   const initials = (tl.name.split(" ")[0]?.[0] || "") + (tl.name.split(" ")[tl.name.split(" ").length - 1]?.[0] || "");
 
   return <div style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:0, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
@@ -998,19 +1106,24 @@ function TLProfilePanel({ tl, wIdx, onClose, isMobile }) {
     </div>
 
     <div style={{padding:"16px 24px 24px"}}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-        <div style={{...cs, padding:12, borderColor: avg >= GOAL ? C.green+"44" : C.border, background: avg >= GOAL ? C.green+"08" : C.card}}>
+      <div style={{display:"flex", gap:10, marginBottom:16}}>
+        <div style={{...cs, flex:1, padding:12, borderColor: avg >= GOAL ? C.green+"44" : C.border, background: avg >= GOAL ? C.green+"08" : C.card}}>
           <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Team Avg Score</div>
           <div style={{display:"flex", alignItems:"flex-end", gap:8, marginTop:4}}>
             <span style={{fontSize:26, fontWeight:800, color: avg >= GOAL ? C.green : C.text, fontFamily:"monospace", lineHeight:1}}>{avg}</span>
             {trend != null && <WoWBadge delta={trend} />}
           </div>
         </div>
-        <div style={{...cs, padding:12}}>
-          <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Goal Attainment</div>
-          <div style={{fontSize:26, fontWeight:800, color:C.text, fontFamily:"monospace", lineHeight:1, marginTop:4}}>{pctGoal}%</div>
-          <div style={{fontSize:9, color:C.dim, marginTop:4}}>{atGoal} of {scored.length} agents {"≥"} {GOAL}</div>
+        <div style={{...cs, flex:1, padding:12}}>
+           <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Total Evals</div>
+           <div style={{fontSize:26, fontWeight:800, color:C.text, fontFamily:"monospace", lineHeight:1, marginTop:4}}>{evalsCount}</div>
         </div>
+      </div>
+
+      <div style={{...cs, padding:12, marginBottom:16}}>
+        <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Goal Attainment</div>
+        <div style={{fontSize:26, fontWeight:800, color:C.text, fontFamily:"monospace", lineHeight:1, marginTop:4}}>{pctGoal}%</div>
+        <div style={{fontSize:9, color:C.dim, marginTop:4}}>{atGoal} of {scored.length} agents {"≥"} {GOAL}</div>
       </div>
 
       <div style={{...cs, marginBottom:16}}>
@@ -1054,209 +1167,7 @@ function TLProfilePanel({ tl, wIdx, onClose, isMobile }) {
 }
 
 // =================================================================
-// AGENT PROFILE PANEL (El original)
-// =================================================================
-function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction,isMobile}){
-  if(!agent)return null;
-  const[profileTab,setProfileTab]=useState("overview");
-  const risk=getRiskLevel(agent,wIdx);
-  const strengths=getStrengths(agent);
-  const opps=getOpportunities(agent);
-  const agentInts=(interactions||[]).filter(i=>i.agent===agent.n);
-  const survey=surveyData?.agents?.[agent.n];
-  const trendData=agent.w.map((v,i)=>v!=null?{wk:WEEKS[i],score:v}:null).filter(Boolean);
-  const selectedWeekISO=weekISO?.[wIdx]||"";
-  const weekEntries=(survey?.entries||[]).filter(e=>e.date&&getWeekStart(e.date)===selectedWeekISO);
-  const weekRatings=weekEntries.filter(e=>e.rating!=null).map(e=>e.rating);
-  const weekAvg=weekRatings.length?+(weekRatings.reduce((s,v)=>s+v,0)/weekRatings.length).toFixed(1):null;
-  const weekComments=weekEntries.filter(e=>e.comment).map(e=>e.comment);
-
-  let streak=0;
-  for(let i=wIdx;i>=0;i--){if(agent.w[i]!=null&&agent.w[i]>=GOAL)streak++;else break;}
-
-  const teamAgents=tl?.agents||[];
-  const teamScores=teamAgents.map(a=>a.w[wIdx]).filter(v=>v!=null).sort((a,b)=>a-b);
-  const myScore=agent.w[wIdx];
-  const percentile=myScore!=null&&teamScores.length?Math.round((teamScores.filter(s=>s<myScore).length/teamScores.length)*100):null;
-
-  const radarData=SCS.map(c=>({skill:SC_FULL[c],value:agent.sc[c]||0,fullMark:100}));
-
-  const parts=agent.n.split(" ");
-  const ini=(parts[0]?.[0]||"")+(parts[parts.length-1]?.[0]||"");
-
-  const csatCorr=csatData?.agentMap?.[agent.n];
-  const qaScore=agent.w[wIdx];
-
-  const tabSt=(t)=>({fontSize:11,fontWeight:profileTab===t?700:500,padding:"8px 16px",cursor:"pointer", color:profileTab===t?C.cyan:C.dim,borderBottom:profileTab===t?"2px solid "+C.cyan:"2px solid transparent", background:"none",border:"none",transition:"all .15s"});
-
-  const handlePrintPDF = () => {
-    const style = document.createElement('style');
-    style.innerHTML = `@media print { @page { size: portrait; margin: 10mm; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #0f1729;} body * { visibility: hidden; } #agent-profile-panel, #agent-profile-panel * { visibility: visible; } #agent-profile-panel { position: absolute; left: 0; top: 0; width: 100%; height: max-content; overflow: visible !important; border: none; } button { display: none !important; } }`;
-    document.head.appendChild(style);
-    window.print();
-    setTimeout(() => document.head.removeChild(style), 1000);
-  };
-
-  return <div id="agent-profile-panel" style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:0, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
-    <div style={{padding:"20px 24px 0",borderBottom:"1px solid "+C.border}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{width:42,height:42,borderRadius:"50%",background:C.cyan+"20",border:"2px solid "+C.cyan+"44", display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700,color:C.cyan}}>{ini}</div>
-          <div>
-            <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>Agent Growth Profile</div>
-            <h2 style={{fontSize:17,fontWeight:700,margin:"2px 0 0"}}>{agent.n}</h2>
-            <div style={{fontSize:10,color:C.dim,marginTop:1}}>{tl?.name||"--"} {"·"} {tl?.site||"--"}</div>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          <button onClick={handlePrintPDF} style={{fontSize:10,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.dim+"44", background:C.bg,color:C.text,cursor:"pointer",fontWeight:600}}>📄 PDF</button>
-          <button style={{fontSize:10,padding:"5px 12px",borderRadius:6,border:"1px solid "+C.cyan+"44", background:C.cyan+"10",color:C.cyan,cursor:"pointer",fontWeight:600}}>+ Log Coaching</button>
-          <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer"}}>{"✕"}</button>
-        </div>
-      </div>
-      <div style={{display:"flex",gap:0}}>
-        <button onClick={()=>setProfileTab("overview")} style={tabSt("overview")}>Overview</button>
-        <button onClick={()=>setProfileTab("skills")} style={tabSt("skills")}>Skills</button>
-        <button onClick={()=>setProfileTab("history")} style={tabSt("history")}>History</button>
-      </div>
-    </div>
-
-    <div style={{padding:"16px 24px 24px"}}>
-      {profileTab==="overview"&&<>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          <div style={{background:"#0c2d1e",borderRadius:10,border:"1px solid #1a4a32",padding:12}}>
-            <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,color:"#6ee7b7",fontWeight:500}}>QA SCORE</span><span style={{fontSize:11}}>{qaScore!=null&&qaScore>=GOAL?"⬆":qaScore!=null?"⚠":""}</span></div>
-            <div style={{fontSize:26,fontWeight:800,color:C.green,fontFamily:"monospace",lineHeight:1,marginTop:4}}>{qaScore!=null?qaScore+"":"--"}</div>
-            {streak>=2&&<div style={{fontSize:9,marginTop:4,color:"#fbbf24"}}>{"🔥"} {streak} weeks {"≥"} {GOAL}</div>}
-            {percentile!=null&&percentile>=75&&<div style={{fontSize:9,marginTop:2,color:C.teal}}>Top {100-percentile}% of team</div>}
-          </div>
-          <div style={{...cs,padding:12}}>
-            <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:9,color:C.dim,fontWeight:500}}>CSAT</span><span style={{fontSize:11}}>{weekAvg!=null&&weekAvg>=4?"⬆":""}</span></div>
-            <div style={{fontSize:26,fontWeight:800,color:weekAvg!=null?(weekAvg>=4?C.green:weekAvg>=3?C.amber:C.red):C.dim,fontFamily:"monospace",lineHeight:1,marginTop:4}}>{weekAvg!=null?weekAvg:"--"}</div>
-            <div style={{fontSize:9,color:C.dim,marginTop:4}}>{weekRatings.length} surveys</div>
-          </div>
-          <div style={{...cs,padding:12,borderLeft:"3px solid "+(risk.level==="HIGH"?C.red:risk.level==="MEDIUM"?C.amber:C.green)}}>
-            <span style={{fontSize:9,color:C.dim,fontWeight:500}}>RISK</span>
-            <div style={{marginTop:4}}><RiskBadge level={risk.level}/></div>
-            {risk.reasons.length>0&&<div style={{fontSize:9,color:risk.level==="HIGH"?C.red:C.amber,marginTop:4}}>{risk.reasons[0]}</div>}
-          </div>
-          <div style={{...cs,padding:12}}>
-            <span style={{fontSize:9,color:C.dim,fontWeight:500}}>EVALS</span>
-            <div style={{fontSize:26,fontWeight:800,color:C.text,fontFamily:"monospace",lineHeight:1,marginTop:4}}>{agentInts.length}</div>
-            <div style={{fontSize:9,color:C.dim,marginTop:4}}>Total evals</div>
-          </div>
-        </div>
-
-        <div style={{...cs,marginBottom:12}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Weekly Trend</div>
-          <ResponsiveContainer width="100%" height={100}>
-            <AreaChart data={trendData}>
-              <defs><linearGradient id={"agGr_"+agent.n.replace(/\s/g,"")} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.cyan} stopOpacity={0.15}/><stop offset="100%" stopColor={C.cyan} stopOpacity={0.01}/></linearGradient></defs>
-              <CartesianGrid stroke={C.border+"40"} strokeDasharray="3 3"/>
-              <XAxis dataKey="wk" tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false}/>
-              <YAxis domain={[0,100]} tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false} width={26}/>
-              <ReferenceLine y={GOAL} stroke={C.green+"55"} strokeDasharray="4 4"/>
-              <Area type="monotone" dataKey="score" stroke={C.cyan} fill={"url(#agGr_"+agent.n.replace(/\s/g,"")+")"} strokeWidth={2} dot={{r:3,fill:C.cyan}}/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-
-        {csatCorr&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.teal}}>
-          <div style={{fontSize:10,fontWeight:600,color:C.teal,marginBottom:6}}>CSAT vs QA Correlation</div>
-          <div style={{display:"flex",gap:16,marginBottom:6}}>
-            <div><span style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.teal}}>{csatCorr.csatRating}</span><span style={{fontSize:10,color:C.dim}}> {"★"} CSAT</span></div>
-            <div><span style={{fontSize:14,fontWeight:700,fontFamily:"monospace",color:C.cyan}}>{csatCorr.qaScore||"--"}</span><span style={{fontSize:10,color:C.dim}}> QA</span></div>
-          </div>
-          {(()=>{const al=csatCorr.alignment; const labels={aligned:{text:"Aligned",desc:"CSAT matches QA",color:C.green}, csat_leads:{text:"CSAT Leads",desc:"Process gaps, customer happy",color:C.amber}, qa_leads:{text:"QA Leads",desc:"Meets QA but customer unhappy",color:C.amber}, both_low:{text:"Needs Attention",desc:"Both low — priority",color:C.red}, neutral:{text:"Moderate",desc:"Metrics in mid-range",color:C.dim}}; const l=labels[al]||labels.neutral;
-            return <div style={{fontSize:10,display:"flex",alignItems:"center",gap:6}}><span style={{width:6,height:6,borderRadius:"50%",background:l.color}}></span><span style={{color:l.color,fontWeight:600}}>{l.text}</span><span style={{color:C.dim}}>{"—"} {l.desc}</span></div>;
-          })()}
-        </div>}
-
-        {risk.reasons.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+(risk.level==="HIGH"?C.red:C.amber)}}>
-          <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:6}}>Risk Factors</div>
-          {risk.reasons.map((r,i)=><div key={i} style={{fontSize:10,color:risk.level==="HIGH"?C.red:C.amber,marginTop:3,display:"flex",alignItems:"center",gap:6}}><span style={{width:4,height:4,borderRadius:"50%",background:risk.level==="HIGH"?C.red:C.amber,flexShrink:0}}></span> {r}</div>)}
-        </div>}
-
-        {survey&&<div style={{...cs,borderLeft:"3px solid "+C.purple}}>
-          <div style={{fontSize:10,fontWeight:600,color:C.purple,marginBottom:6}}>CSAT {"—"} {WEEKS[wIdx]||"Week"}</div>
-          <div style={{fontSize:9,color:C.muted,marginBottom:4}}>All-time: {survey.avgRating||"--"}{"★"} ({survey.surveys} surveys)</div>
-          {weekComments.length>0?weekComments.slice(0,2).map((c,i)=><div key={i} style={{fontSize:10,color:C.text,fontStyle:"italic",padding:"6px 10px",background:C.bg,borderRadius:6,borderLeft:"2px solid "+C.purple+"66",marginBottom:4,lineHeight:1.4}}>{"“"}{c.substring(0,140)}{c.length>140?"...":""}{"”"}</div>):<div style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>No surveys this week</div>}
-        </div>}
-      </>}
-
-      {profileTab==="skills"&&<>
-        <div style={{...cs,marginBottom:12}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:4}}>Skills Spider Chart</div>
-          {(()=>{
-            const size=240,cx=size/2,cy=size/2,r=size*0.38,n=radarData.length;
-            const angles=radarData.map((_,i)=>(Math.PI*2*i/n)-Math.PI/2);
-            const gridLevels=[25,50,75,100];
-            const pts=radarData.map((d,i)=>{const a=angles[i];const pr=d.value/100*r;return[cx+pr*Math.cos(a),cy+pr*Math.sin(a)];});
-            const polyStr=pts.map(p=>p.join(",")).join(" ");
-            return <svg width="100%" height={size} viewBox={`0 0 ${size} ${size}`}>
-              {gridLevels.map(lv=>{const gr=lv/100*r;return <polygon key={lv} points={angles.map(a=>`${cx+gr*Math.cos(a)},${cy+gr*Math.sin(a)}`).join(" ")} fill="none" stroke={C.border} strokeWidth={0.5}/>;})}
-              {angles.map((a,i)=><line key={i} x1={cx} y1={cy} x2={cx+r*Math.cos(a)} y2={cy+r*Math.sin(a)} stroke={C.border} strokeWidth={0.5}/>)}
-              <polygon points={polyStr} fill={C.cyan+"22"} stroke={C.cyan} strokeWidth={2}/>
-              {pts.map((p,i)=><circle key={i} cx={p[0]} cy={p[1]} r={3.5} fill={C.cyan} stroke={C.bg} strokeWidth={1.5}/>)}
-              {radarData.map((d,i)=>{const a=angles[i];const lx=cx+(r+20)*Math.cos(a);const ly=cy+(r+20)*Math.sin(a); const clr=d.value>=70?C.green:d.value>=50?C.amber:C.red; return <text key={i} x={lx} y={ly} textAnchor="middle" dominantBaseline="middle" fill={clr} fontSize={8} fontWeight={600}>{d.skill}</text>;})}
-            </svg>;
-          })()}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-          <div style={{...cs,borderLeft:"3px solid "+C.green}}>
-            <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8}}>Strengths</div>
-            {strengths.map((s,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:5}}><span style={{fontSize:10}}>{s.name}</span><div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:10,fontWeight:700,fontFamily:"monospace",color:C.green}}>{s.pct}%</span></div></div>)}
-          </div>
-          <div style={{...cs,borderLeft:"3px solid "+C.red}}>
-            <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8}}>Opportunities</div>
-            {opps.map((o,i)=><div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:5}}><span style={{fontSize:10}}>{o.name}</span><div style={{display:"flex",alignItems:"center",gap:4}}><span style={{fontSize:9,color:C.dim}}>Tgt {Math.min(o.pct+10,100)}%</span><DonutChart value={o.pct} total={100} color={C.red} size={20}/></div></div>)}
-          </div>
-        </div>
-        <div style={{...cs}}>
-          <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:8}}>All Behaviors</div>
-          {SCS.map(c=><div key={c} style={{display:"flex",alignItems:"center",gap:8,marginTop:5}}>
-            <span style={{fontSize:9,color:C.dim,width:75,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{SC_FULL[c]}</span>
-            <div style={{flex:1,height:5,background:C.bg,borderRadius:3,overflow:"hidden"}}><div style={{width:(agent.sc[c]||0)+"%",height:"100%",borderRadius:3, background:(agent.sc[c]||0)>=70?C.green:(agent.sc[c]||0)>=50?C.amber:C.red,transition:"width .4s"}}></div></div>
-            <span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:30,textAlign:"right", color:(agent.sc[c]||0)>=70?C.green:(agent.sc[c]||0)>=50?C.amber:C.red}}>{agent.sc[c]||0}%</span>
-          </div>)}
-        </div>
-      </>}
-
-      {profileTab==="history"&&<>
-        {agentInts.length>0?<div style={{display:"flex",flexDirection:"column",gap:10}}>
-          {agentInts.slice(-8).reverse().map((int,i)=>{
-            const convId = extractConvId(int.url);
-            const survey = surveyData?.byConvId?.[convId];
-            const isBlindSpot = int.score >= 90 && survey?.rating && survey.rating <= 2;
-            return <div key={i} style={{...cs,padding:14,cursor:"pointer",transition:"all .15s"}} onClick={()=>onViewInteraction([int])} onMouseEnter={e=>e.currentTarget.style.borderColor=C.cyan+"44"} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:18,fontWeight:800,fontFamily:"monospace", color:int.score>=GOAL?C.green:int.score>=60?C.amber:C.red}}>{int.score}</span>
-                <div><div style={{fontSize:10,fontWeight:600}}>{safeDate(int.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div><div style={{fontSize:9,color:C.dim}}>{int.qa} {"·"} {(int.channel||"").toUpperCase()}</div></div>
-              </div>
-              <div style={{display:"flex",gap:4}}>
-                {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:9,color:C.cyan,textDecoration:"none",padding:"3px 8px",borderRadius:4,border:"1px solid "+C.cyan+"33",background:C.cyan+"08"}}>{"↗"} Stella</a>}
-                {int.url&&<a href={int.url} target="_blank" rel="noopener noreferrer" onClick={e=>e.stopPropagation()} style={{fontSize:9,color:C.purple,textDecoration:"none",padding:"3px 8px",borderRadius:4,border:"1px solid "+C.purple+"33",background:C.purple+"08"}}>{"↗"} Gladly</a>}
-              </div>
-            </div>
-            {isBlindSpot && <div style={{marginBottom:8, padding:"3px 8px", background:C.purple+"22", border:"1px solid "+C.purple+"44", borderRadius:4, fontSize:9, color:C.purple, fontWeight:700, display:"inline-block"}}>{"👁"} BLIND SPOT: QA {int.score} but CSAT {survey.rating}★</div>}
-            <div style={{display:"flex",flexWrap:"wrap",gap:3,marginBottom:6}}>
-              {SCS.map(c=>{const val=int.sc?.[c];const met=val==="Met"||val==="Exceed";const partial=val==="Met Some"; return <span key={c} style={{fontSize:8,padding:"2px 5px",borderRadius:3, background:met?C.green+"12":partial?C.amber+"12":C.red+"12", color:met?C.green:partial?C.amber:C.red,fontWeight:600}}>{SC_FULL[c].split(" ")[0]}</span>;})}
-            </div>
-            {Object.keys(int.comments||{}).length>0&&Object.entries(int.comments).slice(0,2).map(([q,c],ci)=>
-              <div key={ci} style={{padding:"8px 12px",borderRadius:6,background:C.bg,borderLeft:"3px solid "+C.cyan+"44",marginBottom:4}}>
-                <div style={{fontSize:8,color:C.cyan,fontWeight:600,marginBottom:2}}>{q}</div>
-                <div style={{fontSize:10,color:C.text,fontStyle:"italic",lineHeight:1.5,opacity:.85}}>{"“"}{c.substring(0,150)}{c.length>150?"...":""}{"”"}</div>
-              </div>)}
-          </div>;})}
-        </div>:<EmptyState message="No evaluations found for this agent"/>}
-      </>}
-    </div>
-  </div>;
-}
-
-// =================================================================
-// NUEVO: LEADERSHIP TAB (TL Analytics Overview)
+// LEADERSHIP TAB (TL Analytics Overview)
 // =================================================================
 function LeadershipTab({ tls, wIdx, onSelectLeader }) {
   const leadSort = useSort("avg");
@@ -2004,7 +1915,7 @@ export default function NextSkill(){
       
       {tab==="qa"&&selQA&&<QAProfilePanel qaName={selQA} wIdx={wIdx} rawInts={D.rawInts} onClose={()=>setSelQA(null)} onViewInteraction={ints=>setModalInts(ints)} isMobile={isMobile} />}
       
-      {tab==="leadership"&&selLeaderDetail&&<TLProfilePanel tl={selLeaderDetail} wIdx={wIdx} onClose={()=>setSelLeaderDetail(null)} isMobile={isMobile} />}
+      {tab==="leadership"&&selLeaderDetail&&<TLProfilePanel tl={selLeaderDetail} wIdx={wIdx} rawInts={D.rawInts} onClose={()=>setSelLeaderDetail(null)} isMobile={isMobile} />}
     </div>
 
     <div style={{textAlign:"center",padding:"12px 28px",borderTop:"1px solid "+C.border}}>
