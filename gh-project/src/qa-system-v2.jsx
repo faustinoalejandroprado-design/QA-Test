@@ -20,6 +20,61 @@ const SC_MAP={"Warm Welcome & Respect":"WW","Thoughtful Listening":"TL","Underst
   "Ownership & Follow-Through":"OW","Sales as Service":"SS","Apologies & Gratitude":"AP",
   "Professionalism & Positive Intent":"PR","Living Our Values":"LV"};
 
+// ─────────────────────────────────────────────
+// C&B WRITING GUIDE - ANALYZER CONSTANTS
+// ─────────────────────────────────────────────
+const AVOID_PATTERNS = {
+  "always / never (criticism)": /\b(always|never)\b/i,
+  "must / you must (command)": /\b(we must|you must|must not)\b/i,
+  "the agent did not": /\bthe agent did not\b/i,
+  "agent missed": /\bagent missed\b/i,
+  "you failed to": /\byou failed to\b/i,
+  "this is incorrect": /this is incorrect/i,
+  "as mentioned before": /as mentioned before/i,
+  "repeated offender": /repeated offender/i,
+  "third-person (agent)": /\bthe agent\b/i,
+};
+const IMPACT_PATTERN = /(customer|cx|next associate|forces|repeat|trust|experience|feel|impression|confusion|delay|friction)/i;
+const RESOURCE_PATTERN = /(gladly answers|qrg|quick reference|template|checklist|answers|skill|resource|refer to)/i;
+const TIMESTAMP_PATTERN = /\b\d{1,2}:\d{2}\b/;
+const DUPE_THRESHOLD = 3;
+
+function analyzeQAFeedback(commentsArray, globalFreq) {
+  let n = commentsArray.length;
+  if (n === 0) return { alignScore: 0, avoidRate: 0, copyRate: 0, impactRate: 0, resourceRate: 0, tsRate: 0, avoidHits: {} };
+
+  let avoidTotal = 0, copyTotal = 0, impactTotal = 0, resTotal = 0, tsTotal = 0;
+  let avoidHits = {};
+
+  commentsArray.forEach(txt => {
+    let hasAvoid = false;
+    Object.entries(AVOID_PATTERNS).forEach(([lbl, rgx]) => {
+      if (rgx.test(txt)) {
+        hasAvoid = true;
+        avoidHits[lbl] = (avoidHits[lbl] || 0) + 1;
+      }
+    });
+    if (hasAvoid) avoidTotal++;
+    if (globalFreq[txt] >= DUPE_THRESHOLD) copyTotal++;
+    if (IMPACT_PATTERN.test(txt)) impactTotal++;
+    if (RESOURCE_PATTERN.test(txt)) resTotal++;
+    if (TIMESTAMP_PATTERN.test(txt)) tsTotal++;
+  });
+
+  const avoidRate = (avoidTotal / n) * 100;
+  const copyRate = (copyTotal / n) * 100;
+  const impactRate = (impactTotal / n) * 100;
+  const resourceRate = (resTotal / n) * 100;
+  const tsRate = (tsTotal / n) * 100;
+
+  const lang = Math.max(0, 1 - (avoidRate / 40));
+  const orig = Math.max(0, 1 - (copyRate / 100));
+  const formula = (impactRate / 100 * 0.50) + (Math.min(resourceRate / 20, 1) * 0.35) + (Math.min(tsRate / 15, 1) * 0.15);
+  const alignScore = Math.round((lang * 0.30 + orig * 0.30 + formula * 0.40) * 100);
+
+  return { alignScore, avoidRate, copyRate, impactRate, resourceRate, tsRate, avoidHits };
+}
+
 function safeDate(dStr) {
   if (!dStr) return new Date();
   let d = new Date(dStr);
@@ -736,7 +791,7 @@ function InteractionModal({interactions,onClose}){
 }
 
 // =================================================================
-// NUEVO: QA PROFILE PANEL (Deep Dive for Evaluators) - CON KEYWORDS
+// NUEVO: QA PROFILE PANEL (Deep Dive for Evaluators) - CON KEYWORDS & WRITING GUIDE
 // =================================================================
 function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMobile}) {
   const [tab, setTab] = useState("bias");
@@ -755,6 +810,14 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
   SCS.forEach(c => catDeductions[c] = { deducts: 0, total: 0 });
 
   let qaProcTotal = 0, qaProcFails = 0, qaNotesTotal = 0, qaNotesFails = 0;
+
+  const globalCommentFreq = {};
+  allWeekInts.forEach(int => {
+    Object.values(int.comments || {}).forEach(c => {
+      const txt = c.trim();
+      if(txt) globalCommentFreq[txt] = (globalCommentFreq[txt]||0) + 1;
+    });
+  });
 
   qaInts.forEach(int => {
     totalScore += int.score;
@@ -796,6 +859,9 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
     if (int.notes !== null) { qaNotesTotal++; if (!int.notes) qaNotesFails++; }
   });
 
+  const rawCommentsArray = qaInts.flatMap(int => Object.values(int.comments || {}).map(c => c.trim()).filter(Boolean));
+  const writingMetrics = analyzeQAFeedback(rawCommentsArray, globalCommentFreq);
+
   const avgScore = +(totalScore / qaInts.length).toFixed(1);
   const avgAHT = validEvals > 0 ? Math.round(totalValidMins / validEvals) : 0;
   allComments.sort((a,b) => new Date(b.date) - new Date(a.date));
@@ -803,7 +869,6 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
 
   const teamDeductions = {};
   SCS.forEach(c => teamDeductions[c] = { deducts: 0, total: 0 });
-  
   let teamProcTotal = 0, teamProcFails = 0, teamNotesTotal = 0, teamNotesFails = 0;
 
   allWeekInts.forEach(int => {
@@ -882,6 +947,16 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
 
   const topKeywords = getTopKeywords(displayedComments);
 
+  // Filtramos los dupes únicos para no mostrar la misma frase 5 veces en la vista
+  const uniqueDupes = [];
+  const seenDupeTexts = new Set();
+  allComments.forEach(c => {
+    if(globalCommentFreq[c.text] >= DUPE_THRESHOLD && !seenDupeTexts.has(c.text)) {
+      seenDupeTexts.add(c.text);
+      uniqueDupes.push({ text: c.text, count: globalCommentFreq[c.text] });
+    }
+  });
+
   return <div style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:0, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
     <div style={{padding:"20px 24px 0",borderBottom:"1px solid "+C.border}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
@@ -894,10 +969,11 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
         </div>
         <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer"}}>{"✕"}</button>
       </div>
-      <div style={{display:"flex",gap:0}}>
+      <div style={{display:"flex",gap:0, overflowX: "auto"}}>
         <button onClick={()=>setTab("bias")} style={tabSt("bias")}>Calibration</button>
         <button onClick={()=>setTab("feedback")} style={tabSt("feedback")}>Feedback Log</button>
         <button onClick={()=>setTab("ops")} style={tabSt("ops")}>Operations</button>
+        <button onClick={()=>setTab("writing")} style={tabSt("writing")}>Writing Guide</button>
       </div>
     </div>
 
@@ -968,6 +1044,58 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
               </div>
             </div>
          </div>
+      </>}
+
+      {tab === "writing" && <>
+         <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16}}>
+            <div style={{...cs, padding:12, borderColor: writingMetrics.alignScore >= 70 ? C.green+"44" : writingMetrics.alignScore >= 50 ? C.amber+"44" : C.red+"44", background: writingMetrics.alignScore >= 70 ? C.green+"08" : writingMetrics.alignScore >= 50 ? C.amber+"08" : C.red+"08"}}>
+               <div style={{fontSize:9, color:C.text, fontWeight:700, textTransform:"uppercase"}}>Alignment Score</div>
+               <div style={{fontSize:28, fontWeight:800, color: writingMetrics.alignScore >= 70 ? C.green : writingMetrics.alignScore >= 50 ? C.amber : C.red, fontFamily:"monospace", marginTop:4}}>{writingMetrics.alignScore}</div>
+               <div style={{fontSize:9, color:C.dim, marginTop:4}}>Guía de Escritura C&B</div>
+            </div>
+            <div style={{...cs, padding:12}}>
+               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Copy-Paste Rate</div>
+               <div style={{fontSize:28, fontWeight:800, color: writingMetrics.copyRate > 15 ? C.red : C.text, fontFamily:"monospace", marginTop:4}}>{Math.round(writingMetrics.copyRate)}%</div>
+               <div style={{fontSize:9, color:C.dim, marginTop:4}}>{Math.round(writingMetrics.copyRate/100 * rawCommentsArray.length)} comentarios repetidos</div>
+            </div>
+         </div>
+
+         <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16}}>
+            <div style={{...cs, padding:12}}>
+               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase", marginBottom:8}}>Formula Pt. 2 (Impact)</div>
+               <div style={{width:"100%", background:C.bg, height:6, borderRadius:3}}><div style={{width: Math.min(100, writingMetrics.impactRate)+"%", background: writingMetrics.impactRate >= 50 ? C.green : C.red, height:"100%", borderRadius:3}}></div></div>
+               <div style={{fontSize:10, color:C.text, fontFamily:"monospace", marginTop:6}}>{Math.round(writingMetrics.impactRate)}% <span style={{color:C.dim, fontSize:9}}>included</span></div>
+            </div>
+            <div style={{...cs, padding:12}}>
+               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase", marginBottom:8}}>Formula Pt. 3 (Resource)</div>
+               <div style={{width:"100%", background:C.bg, height:6, borderRadius:3}}><div style={{width: Math.min(100, writingMetrics.resourceRate)+"%", background: writingMetrics.resourceRate >= 10 ? C.green : C.amber, height:"100%", borderRadius:3}}></div></div>
+               <div style={{fontSize:10, color:C.text, fontFamily:"monospace", marginTop:6}}>{Math.round(writingMetrics.resourceRate)}% <span style={{color:C.dim, fontSize:9}}>included</span></div>
+            </div>
+         </div>
+
+         {Object.keys(writingMetrics.avoidHits).length > 0 && (
+           <div style={{...cs, marginBottom:16, borderLeft: "3px solid " + C.red}}>
+             <div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:8}}>Avoid Phrases Detected</div>
+             {Object.entries(writingMetrics.avoidHits).map(([phrase, count], i) => (
+               <div key={i} style={{display:"flex", justifyContent:"space-between", padding:"4px 0", borderBottom:"1px solid "+C.border+"33"}}>
+                 <span style={{fontSize:10, color:C.text}}>{phrase}</span>
+                 <span style={{fontSize:10, fontWeight:700, color:C.red, fontFamily:"monospace"}}>{count}x</span>
+               </div>
+             ))}
+           </div>
+         )}
+
+         {uniqueDupes.length > 0 && (
+           <div style={{...cs, marginBottom:16}}>
+             <div style={{fontSize:11,fontWeight:600,color:C.amber,marginBottom:8}}>Top Copy-Paste Templates</div>
+             {uniqueDupes.sort((a,b) => b.count - a.count).slice(0,5).map((dupe, i) => (
+               <div key={i} style={{padding:"8px 12px", background:C.bg, borderRadius:6, marginBottom:6, borderLeft:"2px solid "+C.amber+"66"}}>
+                 <div style={{fontSize:9, color:C.amber, fontWeight:700, marginBottom:4}}>Used {dupe.count} times across team</div>
+                 <div style={{fontSize:10, color:C.dim, fontStyle:"italic"}}>{dupe.text.substring(0, 100)}...</div>
+               </div>
+             ))}
+           </div>
+         )}
       </>}
 
       {tab === "feedback" && <>
@@ -1059,7 +1187,7 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
 }
 
 // =================================================================
-// NUEVO: TL PROFILE PANEL (Deep Dive for Team Leads)
+// TL PROFILE PANEL
 // =================================================================
 function TLProfilePanel({ tl, wIdx, rawInts, onClose, isMobile }) {
   if (!tl) return null;
@@ -1519,15 +1647,30 @@ function QAAnalyticsTab({wIdx, onSelectQA}){
   const targetWeek = D.weekISO[wIdx];
   const weekInts = (D.rawInts || []).filter(int => getWeekStart(int.date) === targetWeek);
 
+  const globalCommentFreq = {};
+  weekInts.forEach(int => {
+    Object.values(int.comments || {}).forEach(c => {
+      const txt = c.trim();
+      if(txt) globalCommentFreq[txt] = (globalCommentFreq[txt]||0) + 1;
+    });
+  });
+
   const qaMap = {};
   let totalScore = 0;
 
   weekInts.forEach(int => {
-    if(!qaMap[int.qa]) qaMap[int.qa] = { name: int.qa, scores: [], n: 0, chars: 0, commentsCount: 0, metTotal: 0, metWithNote: 0, criticalFails: 0, totalValidMins: 0, validEvalsCount: 0 };
+    if(!qaMap[int.qa]) qaMap[int.qa] = { name: int.qa, scores: [], n: 0, chars: 0, commentsCount: 0, metTotal: 0, metWithNote: 0, criticalFails: 0, totalValidMins: 0, validEvalsCount: 0, rawComments: [] };
     const q = qaMap[int.qa];
     q.scores.push(int.score); q.n++; totalScore += int.score;
     if(int.score < 50) q.criticalFails++;
-    Object.values(int.comments || {}).forEach(c => { if (c.trim().length > 0) { q.chars += c.trim().length; q.commentsCount++; } });
+    Object.values(int.comments || {}).forEach(c => { 
+      const txt = c.trim();
+      if (txt.length > 0) { 
+        q.chars += txt.length; 
+        q.commentsCount++; 
+        q.rawComments.push(txt);
+      } 
+    });
     Object.keys(int.comments || {}).forEach(qText => { const code = SC_MAP[qText]; if (code && (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed")) q.metWithNote++; });
     SCS.forEach(code => { if (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed") q.metTotal++; });
     if (int.duration >= 1 && int.duration <= 120) { q.totalValidMins += int.duration; q.validEvalsCount++; }
@@ -1543,14 +1686,17 @@ function QAAnalyticsTab({wIdx, onSelectQA}){
     const metNotePct = q.metTotal > 0 ? Math.round((q.metWithNote / q.metTotal) * 100) : 0;
     const failRate = q.n > 0 ? Math.round((q.criticalFails / q.n) * 100) : 0;
     const avgAHT = q.validEvalsCount > 0 ? Math.round(q.totalValidMins / q.validEvalsCount) : 0;
+    
+    const writingMetrics = analyzeQAFeedback(q.rawComments, globalCommentFreq);
 
     let focusArea = "Calibrated"; let statusColor = C.green;
     if (deviation < -5) { focusArea = "Too Severe"; statusColor = C.red; }
     else if (deviation > 5) { focusArea = "Too Lenient"; statusColor = C.amber; }
     else if (sd > 8) { focusArea = "Inconsistent Criteria"; statusColor = C.orange; }
     else if (avgChars > 0 && avgChars < 30) { focusArea = "Poor Feedback"; statusColor = C.purple; }
+    else if (writingMetrics.copyRate > 15) { focusArea = "High Copy/Paste"; statusColor = C.red; }
 
-    return { ...q, avg, sd, deviation, focusArea, statusColor, avgChars, metNotePct, failRate, avgAHT };
+    return { ...q, ...writingMetrics, avg, sd, deviation, focusArea, statusColor, avgChars, metNotePct, failRate, avgAHT };
   }).filter(q => q.n > 0);
 
   const alerts = [];
@@ -1559,6 +1705,8 @@ function QAAnalyticsTab({wIdx, onSelectQA}){
     if (mostSevere && mostSevere.deviation < -4) alerts.push({ qa: mostSevere.name, val: mostSevere.deviation, msg: `Scoring ${Math.abs(mostSevere.deviation)} pts below team average. Requires calibration.`, color: C.red, icon: "⛔", title: "Severity Alert" });
     const mostVolatile = [...qaData].sort((a,b)=>b.sd - a.sd)[0];
     if (mostVolatile && mostVolatile.sd > 7) alerts.push({ qa: mostVolatile.name, val: mostVolatile.sd, msg: `Highest standard deviation (${mostVolatile.sd}). Unstable scoring criteria.`, color: C.orange, icon: "⚠", title: "Volatility Alert" });
+    const mostCopied = [...qaData].sort((a,b)=>b.copyRate - a.copyRate)[0];
+    if (mostCopied && mostCopied.copyRate > 15) alerts.push({ qa: mostCopied.name, val: mostCopied.copyRate, msg: `${Math.round(mostCopied.copyRate)}% of comments are copy-pasted. Check feedback quality.`, color: C.red, icon: "📝", title: "Template Alert" });
   }
 
   const ScatterTooltip = ({ active, payload }) => {
@@ -1577,7 +1725,8 @@ function QAAnalyticsTab({wIdx, onSelectQA}){
   let tableColumns = [];
   if (view === "calibration") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avg","Avg Score",80],["deviation","Dev. from Avg",100],["sd","Volatility (SD)",100],["focusArea","Focus Area"]];
   else if (view === "feedback") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgChars","Avg Comment Length",140],["metNotePct","Positive Reinforcement",150],["commentsCount","Total Notes",90],["focusArea","Focus Area"]];
-  else tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgAHT","Avg Time (mins)",120],["failRate","Zero-Out Rate (<50)",140],["avg","Avg Score",80],["focusArea","Focus Area"]];
+  else if (view === "ops") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgAHT","Avg Time (mins)",120],["failRate","Zero-Out Rate (<50)",140],["avg","Avg Score",80],["focusArea","Focus Area"]];
+  else if (view === "writing") tableColumns = [["name","QA Analyst"],["commentsCount","Comments",80],["alignScore","Alignment Score",120],["copyRate","Copy-Paste %",120],["avoidRate","Avoid Phrases %",140],["focusArea","Focus Area"]];
 
   const btnStyle = (active) => ({fontSize:10, padding:"6px 14px", borderRadius:6, cursor:"pointer", fontWeight:600, border:"none", background: active ? C.cyan+"22" : "transparent", color: active ? C.cyan : C.dim, borderBottom: active ? "2px solid "+C.cyan : "2px solid transparent", transition: "all 0.2s"});
 
@@ -1615,15 +1764,17 @@ function QAAnalyticsTab({wIdx, onSelectQA}){
         <div style={{fontSize:12,fontWeight:700,color:C.text}}>Analyst Performance Lenses <span style={{fontSize:10, fontWeight:400, color:C.dim}}>(Weekly: {WEEKS[wIdx]})</span></div>
         <div style={{display:"flex", background:C.bg, borderRadius:8, padding:2, border:"1px solid "+C.border}}>
           <button onClick={() => setView("calibration")} style={btnStyle(view === "calibration")}>🎯 Calibration</button>
-          <button onClick={() => setView("feedback")} style={btnStyle(view === "feedback")}>✍️ Coaching & Feedback</button>
+          <button onClick={() => setView("feedback")} style={btnStyle(view === "feedback")}>✍️ Coaching</button>
           <button onClick={() => setView("ops")} style={btnStyle(view === "ops")}>⏱️ Operations</button>
+          <button onClick={() => setView("writing")} style={btnStyle(view === "writing")}>📝 Writing Guide</button>
         </div>
       </div>
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "500px"}}>
         <SortHeader columns={tableColumns} sortKey={qaSort.sk} sortDir={qaSort.sd} onSort={qaSort.toggle}/>
         <tbody>{[...qaData].sort((a,b)=>qaSort.sortFn(a[qaSort.sk],b[qaSort.sk])).map((q,i)=>
           <tr key={i} onClick={() => onSelectQA(q.name)} style={{borderBottom:"1px solid "+C.border+"22", transition:"background 0.15s", cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            <td style={{padding:"10px",fontWeight:600, color:C.text}}>{q.name}</td><td style={{padding:"10px",fontFamily:"monospace"}}>{q.n}</td>
+            <td style={{padding:"10px",fontWeight:600, color:C.text}}>{q.name}</td>
+            {view !== "writing" && <td style={{padding:"10px",fontFamily:"monospace"}}>{q.n}</td>}
             {view === "calibration" && <>
               <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:q.avg>=GOAL?C.green:C.amber}}>{q.avg}</td>
               <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600}}><span style={{color: q.deviation > 0 ? C.cyan : q.deviation < 0 ? C.red : C.dim}}>{q.deviation > 0 ? "▲ +" : q.deviation < 0 ? "▼ " : ""}{q.deviation !== 0 ? q.deviation : "--"} pts</span></td>
@@ -1638,6 +1789,12 @@ function QAAnalyticsTab({wIdx, onSelectQA}){
               <td style={{padding:"10px",fontFamily:"monospace", color:C.text}}>{q.avgAHT > 0 ? `${q.avgAHT} mins` : "--"}</td>
               <td style={{padding:"10px",fontFamily:"monospace", color: q.failRate > 10 ? C.red : C.dim}}>{q.failRate}% fatals</td>
               <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:C.cyan}}>{q.avg}</td>
+            </>}
+            {view === "writing" && <>
+              <td style={{padding:"10px",fontFamily:"monospace",color:C.dim}}>{q.commentsCount}</td>
+              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:q.alignScore>=70?C.green:q.alignScore>=50?C.amber:C.red}}>{q.alignScore}</td>
+              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600,color:q.copyRate>15?C.red:C.text}}>{Math.round(q.copyRate)}%</td>
+              <td style={{padding:"10px",fontFamily:"monospace",color:q.avoidRate>15?C.red:C.text}}>{Math.round(q.avoidRate)}%</td>
             </>}
             <td style={{padding:"10px"}}><span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background: q.statusColor+"15", color: q.statusColor, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, border:"1px solid "+q.statusColor+"33"}}>{q.focusArea}</span></td>
           </tr>)}
