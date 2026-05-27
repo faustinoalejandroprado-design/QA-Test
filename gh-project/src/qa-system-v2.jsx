@@ -776,7 +776,7 @@ function InteractionModal({interactions,onClose}){
           </div>)}
           <div style={{fontSize:9,fontWeight:600,color:C.muted,marginBottom:4,paddingLeft:4}}>Process & Compliance</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-            {[["Follows Procedures",int.proc],["Notes in Gladly",int.notes]].map(([lbl,val])=><div key={lbl} style={{padding:"7px 10px",borderRadius:5,fontSize:10,background:val?C.green+"08":C.red+"08",borderLeft:"3px solid "+(val?C.green:C.red),display:"flex",justifyContent:"space-between"}}><span>{lbl}</span><span style={{fontWeight:700,fontSize:9,color:val?C.green:C.red}}>{val?"Met":"Not Met"}</span></div>)}
+            [["Follows Procedures",int.proc],["Notes in Gladly",int.notes]].map(([lbl,val])=><div key={lbl} style={{padding:"7px 10px",borderRadius:5,fontSize:10,background:val?C.green+"08":C.red+"08",borderLeft:"3px solid "+(val?C.green:C.red),display:"flex",justifyContent:"space-between"}}><span>{lbl}</span><span style={{fontWeight:700,fontSize:9,color:val?C.green:C.red}}>{val?"Met":"Not Met"}</span></div>)
           </div>
         </div>
         {commentKeys.length>0?<div style={{marginBottom:8}}>
@@ -1129,7 +1129,7 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
          )}
 
          {displayedComments.length > 0 ? <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {displayedComments.slice(0, 30).map((c, i) => {
+             {displayedComments.slice(0, 30).map((c, i) => {
                const isPoor = c.length < 30;
                return <div key={i} style={{...cs, padding:12, borderLeft: isPoor ? "3px solid "+C.red : "3px solid "+C.green}}>
                   <div style={{display:"flex", justifyContent:"space-between", marginBottom:6}}>
@@ -1139,7 +1139,7 @@ function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMo
                   {fbFilter === "All" && c.isDeduction && <div style={{fontSize:8, color:C.purple, marginBottom:4, fontWeight:600}}>DEDUCTION: {c.category}</div>}
                   <div style={{fontSize:11, color:C.dim, fontStyle:"italic", lineHeight:1.4}}>"{c.text}"</div>
                </div>
-            })}
+             })}
          </div> : <EmptyState message={fbFilter === "All" ? "No comments left this week" : `No deduction comments found for ${fbFilter}`} />}
       </>}
 
@@ -1877,6 +1877,28 @@ function SetupScreen({onDataReady,savedConfig}){
       <button onClick={()=>handleConnect()} disabled={!qaId||!rosterId||loading} style={{width:"100%",padding:"14px 0",borderRadius:8,border:"none", background:qaId&&rosterId&&!loading?"linear-gradient(135deg,"+C.cyan+","+C.blue+")":C.muted, color:qaId&&rosterId?C.text:C.text+"66",fontSize:13,fontWeight:700,cursor:qaId&&rosterId&&!loading?"pointer":"not-allowed", letterSpacing:"1px",textTransform:"uppercase"}}>{loading?"Connecting...":"Connect & Launch"}</button>
     </div>
   </div>;
+}
+
+// ─────────────────────────────────────────────
+// N U E V O: COMPONENTE AGENT PROFILE PANEL (BÁSICO)
+// ─────────────────────────────────────────────
+function AgentProfilePanel({ agent, tl, wIdx, interactions, surveyData, csatData, weekISO, onClose, onViewInteraction, isMobile }) {
+  if (!agent) return null;
+  return (
+    <div style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:20, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+        <div>
+          <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>Agent Deep Dive</div>
+          <h2 style={{fontSize:17,fontWeight:700,margin:"2px 0 0",color:C.text}}>{agent.n}</h2>
+        </div>
+        <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer"}}>{"✕"}</button>
+      </div>
+      <div style={{color: C.dim, fontSize: 12, padding: 16, background: C.card, borderRadius: 8, border: "1px dashed "+C.cyan}}>
+        <p><strong>Nota:</strong> Este es un componente temporal para evitar que la aplicación se rompa.</p>
+        <p>Pega aquí la estructura original completa de tu <code>AgentProfilePanel</code> si la tienes guardada en otro lado.</p>
+      </div>
+    </div>
+  );
 }
 
 export default function NextSkill(){
