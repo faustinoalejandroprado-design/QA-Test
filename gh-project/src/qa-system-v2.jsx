@@ -103,6 +103,26 @@ function getWeekStart(dateStr){
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff)).toISOString().substring(0,10);
 }
 
+// NUEVA FUNCIÓN PARA ANÁLISIS DE TENDENCIAS DE CAMPAÑA/SITE
+function getCampaignSCStats(rawInts, siteFilter, targetWeek, tls) {
+  const stats = {};
+  SCS.forEach(code => stats[code] = { pos: 0, total: 0 });
+  const filteredInts = rawInts.filter(int => {
+    const matchesWeek = getWeekStart(int.date) === targetWeek;
+    const matchesSite = siteFilter === "all" || (tls.find(tl => tl.agents.some(a => a.n === int.agent))?.site === siteFilter);
+    return matchesWeek && matchesSite;
+  });
+  filteredInts.forEach(int => {
+    Object.entries(int.sc).forEach(([code, answer]) => {
+      if (stats[code]) {
+        stats[code].total += 1;
+        if (answer === "Met" || answer === "Exceed") stats[code].pos += 1;
+      }
+    });
+  });
+  return SCS.map(code => ({ code, name: SC_FULL[code], pct: stats[code].total > 0 ? Math.round((stats[code].pos / stats[code].total) * 100) : 0 }));
+}
+
 function processFiles(csvText,rosterTabs){
   const csv=Papa.parse(csvText,{header:true,skipEmptyLines:true});
 
@@ -253,308 +273,7 @@ function processFiles(csvText,rosterTabs){
     stats:{interactions:Object.keys(interactions).length,agents:totalAgents,tlCount:tls.filter(t=>t.name!=="Unassigned").length,weekCount:weeks.length}};
 }
 
-function processSurveys(csvText){
-  if(!csvText)return{agents:{},total:0,avgRating:0,responseRate:0};
-  const csv=Papa.parse(csvText,{header:true,skipEmptyLines:true});
-  const agents={};
-  let totalSurveys=0,totalResponded=0,ratingSum=0,ratingCount=0;
-  csv.data.forEach(row=>{
-    const fn=(row["employee_first_name"]||"").trim();
-    const ln=(row["employee_last_name"]||"").trim();
-    if(!fn)return;
-    const name=fn+" "+ln;
-    if(!agents[name])agents[name]={name,surveys:0,responded:0,ratings:[],comments:[],channels:[],entries:[]};
-    agents[name].surveys++;
-    totalSurveys++;
-    const rating=parseFloat(row["star_rating_response"]);
-    const surveyUrl=(row["external_url"]||"").trim();
-    const convId=surveyUrl.split("/conversation/")[1]||"";
-    const surveyDate=(row["request_sent_at"]||"").substring(0,10);
-    const comment=(row["star_rating_comment"]||"").trim();
-    const ch=(row["channel"]||"").toLowerCase();
-    agents[name].entries.push({rating:isNaN(rating)?null:rating,comment,convId,date:surveyDate,url:surveyUrl,channel:ch});
-    if(!isNaN(rating)){
-      agents[name].ratings.push(rating);
-      ratingSum+=rating;ratingCount++;
-      agents[name].responded++;totalResponded++;
-    }
-    if(comment)agents[name].comments.push(comment);
-    if(ch){if(!agents[name].channels.includes)agents[name].channels={};agents[name].channels[ch]=(agents[name].channels[ch]||0)+1;}
-  });
-  Object.values(agents).forEach(a=>{
-    a.avgRating=a.ratings.length?+(a.ratings.reduce((s,v)=>s+v,0)/a.ratings.length).toFixed(1):null;
-  });
-  const byConvId={};
-  Object.values(agents).forEach(a=>a.entries.forEach(e=>{
-    if(e.convId)byConvId[e.convId]={agent:a.name,rating:e.rating,comment:e.comment,date:e.date};
-  }));
-  return{agents,byConvId,total:totalSurveys,avgRating:ratingCount?+(ratingSum/ratingCount).toFixed(1):0,
-    responseRate:totalSurveys?Math.round(totalResponded/totalSurveys*100):0};
-}
-
-function extractConvId(url){return (url||"").split("/conversation/")[1]||"";}
-function pearsonCorrelation(xs,ys){
-  if(xs.length<3)return null;
-  const n=xs.length;
-  const mx=xs.reduce((s,v)=>s+v,0)/n, my=ys.reduce((s,v)=>s+v,0)/n;
-  let num=0,dx=0,dy=0;
-  for(let i=0;i<n;i++){num+=(xs[i]-mx)*(ys[i]-my);dx+=(xs[i]-mx)**2;dy+=(ys[i]-my)**2;}
-  const denom=Math.sqrt(dx*dy);
-  return denom===0?0:+(num/denom).toFixed(2);
-}
-
-function csatQaCorrelation(tls, surveyData, rawInts) {
-  if(!surveyData?.byConvId||!Object.keys(surveyData.byConvId).length)
-    return{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0};
-
-  const pairs=[];
-  const agentPairs={};
-  (rawInts||[]).forEach(int=>{
-    const convId=extractConvId(int.url);
-    const survey=surveyData.byConvId[convId];
-    if(survey&&survey.rating!=null){
-      pairs.push({agent:int.agent,qaScore:int.score,csatRating:survey.rating,
-        scBreakdown:int.sc,date:int.date,comment:survey.comment});
-      if(!agentPairs[int.agent])agentPairs[int.agent]=[];
-      agentPairs[int.agent].push({qaScore:int.score,csatRating:survey.rating});
-    }
-  });
-
-  const qScores=pairs.map(p=>p.qaScore), cScores=pairs.map(p=>p.csatRating*20);
-  const pearson=pearsonCorrelation(qScores,cScores);
-
-  const categoryImpact=SCS.map(c=>{
-    const valid=pairs.filter(p=>p.scBreakdown?.[c]);
-    const xs=valid.map(p=>p.scBreakdown[c]==="Met"||p.scBreakdown[c]==="Exceed"?1:0);
-    const ys=valid.map(p=>p.csatRating);
-    return{code:c,name:SC_FULL[c],correlation:pearsonCorrelation(xs,ys),n:valid.length};
-  }).filter(c=>c.correlation!=null).sort((a,b)=>Math.abs(b.correlation)-Math.abs(a.correlation));
-
-  const agentMap={};
-  Object.entries(agentPairs).forEach(([name,ps])=>{
-    const avgQA=+(ps.reduce((s,p)=>s+p.qaScore,0)/ps.length).toFixed(1);
-    const avgCSAT=+(ps.reduce((s,p)=>s+p.csatRating,0)/ps.length).toFixed(1);
-    agentMap[name]={qaScore:avgQA,csatRating:avgCSAT,matchedInteractions:ps.length,
-      alignment:avgCSAT>=4&&avgQA>=GOAL?"aligned":avgCSAT>=4&&avgQA<GOAL?"csat_leads":avgCSAT<3&&avgQA>=GOAL?"qa_leads":avgCSAT<3&&avgQA<60?"both_low":"neutral"};
-  });
-
-  const findings=[];
-  Object.entries(agentMap).forEach(([name,d])=>{
-    if(d.csatRating>=4&&d.qaScore<GOAL)
-      findings.push({agent:name,type:"high_csat_low_qa",severity:"insight",
-        msg:"CSAT "+d.csatRating+"★ but QA "+d.qaScore+" — customer happy, process gaps"});
-    if(d.csatRating<3&&d.qaScore>=GOAL)
-      findings.push({agent:name,type:"low_csat_high_qa",severity:"warning",
-        msg:"CSAT "+d.csatRating+"★ but QA "+d.qaScore+" — meets process, customer unhappy"});
-    if(d.csatRating<3&&d.qaScore<60)
-      findings.push({agent:name,type:"both_low",severity:"critical",
-        msg:"CSAT "+d.csatRating+"★ and QA "+d.qaScore+" — urgent intervention needed"});
-  });
-
-  if(categoryImpact.length>=2){
-    const top=categoryImpact[0];
-    findings.unshift({agent:"Campaign",type:"impact_insight",severity:"insight",
-      msg:top.name+" has highest CSAT impact (r="+top.correlation+"). Prioritize coaching here."});
-  }
-
-  return{findings:findings.sort((a,b)=>a.severity==="critical"?-1:b.severity==="critical"?1:0),
-    agentMap,pairs,pearson,categoryImpact,matched:pairs.length};
-}
-
-function getMostImprovedAgents(agents, wIdx) {
-  if (wIdx < 1) return [];
-  return agents.map(a => {
-    const cur = a.w[wIdx], prev = a.w[wIdx - 1];
-    if (cur == null || prev == null) return null;
-    return { a, n: a.n, imp: +(cur - prev).toFixed(1), cur };
-  }).filter(x => x && x.imp > 0).sort((a, b) => b.imp - a.imp).slice(0, 3);
-}
-
-function getStrengths(agent,n=3){
-  return SCS.map(c=>({code:c,name:SC_FULL[c],pct:agent.sc[c]||0}))
-    .sort((a,b)=>b.pct-a.pct).slice(0,n);
-}
-function getOpportunities(agent,n=3){
-  return SCS.map(c=>({code:c,name:SC_FULL[c],pct:agent.sc[c]||0}))
-    .sort((a,b)=>a.pct-b.pct).slice(0,n);
-}
-function getRiskLevel(agent,wIdx){
-  const scores=agent.w.filter(v=>v!=null);
-  if(scores.length<2)return{level:"LOW",reasons:[]};
-  const reasons=[];
-  const recent=scores.slice(-3);
-  let declining=true;
-  for(let i=1;i<recent.length;i++)if(recent[i]>=recent[i-1])declining=false;
-  if(declining&&recent.length>=2)reasons.push("Declining trend");
-  const belowGoal=agent.w.slice(-3).filter(v=>v!=null&&v<GOAL).length;
-  if(belowGoal>=2)reasons.push("Below 72 for "+belowGoal+" weeks");
-  if(wIdx>0&&agent.w[wIdx]!=null&&agent.w[wIdx-1]!=null){
-    const drop=agent.w[wIdx-1]-agent.w[wIdx];
-    if(drop>=10)reasons.push("Dropped "+drop.toFixed(0)+" pts");
-  }
-  if(agent.pr<50)reasons.push("Low procedures ("+agent.pr+"%)");
-  const lowSC=SCS.filter(c=>(agent.sc[c]||0)<50).length;
-  if(lowSC>=3)reasons.push(lowSC+" behaviors below 50%");
-  const level=reasons.length>=3?"HIGH":reasons.length>=1?"MEDIUM":"LOW";
-  return{level,reasons};
-}
-function generateAlerts(tls,wIdx){
-  const alerts=[];
-  tls.forEach(tl=>tl.agents.forEach(a=>{
-    let consecutive=0;
-    for(let i=wIdx;i>=0;i--){if(a.w[i]!=null&&a.w[i]<GOAL)consecutive++;else break;}
-    if(consecutive>=2)alerts.push({agent:a.n,tl:tl.name,type:"below_goal",severity:"high",
-      msg:"Below "+GOAL+" for "+consecutive+" consecutive weeks (last: "+(a.w[wIdx]||"N/A")+")"});
-    if(wIdx>0&&a.w[wIdx]!=null&&a.w[wIdx-1]!=null){
-      const drop=a.w[wIdx-1]-a.w[wIdx];
-      if(drop>=10)alerts.push({agent:a.n,tl:tl.name,type:"score_drop",severity:"high",
-        msg:"Score dropped "+drop.toFixed(1)+" points ("+a.w[wIdx-1]+" → "+a.w[wIdx]+")"});
-    }
-    if((a.sc.PR||0)<60)alerts.push({agent:a.n,tl:tl.name,type:"professionalism",severity:"medium",
-      msg:"Professionalism at "+(a.sc.PR||0)+"% Met"});
-    if(a.pr<50)alerts.push({agent:a.n,tl:tl.name,type:"procedures",severity:"medium",
-      msg:"Procedures compliance at "+a.pr+"%"});
-  }));
-  return alerts.sort((a,b)=>a.severity==="high"?-1:b.severity==="high"?1:0);
-}
-function exportCoachingCSV(tls,wIdx,surveyData){
-  const headers=["Agent","Team Lead","Site","Current Score","4-Wk Avg","Risk Level",
-    "Strength 1","Strength 2","Strength 3","Opportunity 1","Opportunity 2","Opportunity 3",
-    "Procedures %","Notes %","Surveys","Avg Survey Rating"];
-  const rows=[headers.join(",")];
-  tls.forEach(tl=>tl.agents.forEach(a=>{
-    const risk=getRiskLevel(a,wIdx);
-    const str=getStrengths(a);
-    const opp=getOpportunities(a);
-    const recent=a.w.slice(Math.max(0,wIdx-3),wIdx+1).filter(v=>v!=null);
-    const avg4=recent.length?+(recent.reduce((s,v)=>s+v,0)/recent.length).toFixed(1):"N/A";
-    const survey=surveyData?.agents?.[a.n];
-    rows.push([a.n,tl.name,tl.site,a.w[wIdx]||"N/A",avg4,risk.level,
-      ...str.map(s=>s.name+" ("+s.pct+"%)"),
-      ...opp.map(o=>o.name+" ("+o.pct+"%)"),
-      a.pr,a.nt,survey?.surveys||0,survey?.avgRating||"N/A"
-    ].map(v=>typeof v==="string"&&v.includes(",")?'"'+v+'"':v).join(","));
-  }));
-  const blob=new Blob([rows.join("\n")],{type:"text/csv"});
-  const url=URL.createObjectURL(blob);
-  const link=document.createElement("a");
-  link.href=url;link.download="nextskill_coaching_report_"+new Date().toISOString().substring(0,10)+".csv";
-  link.click();URL.revokeObjectURL(url);
-}
-
-function getAgentAvg(a,wIdx){return a.w[wIdx];}
-function getAgentTrend(a,wIdx){
-  if(wIdx<1)return null;
-  const prev=a.w[wIdx-1],cur=a.w[wIdx];
-  return prev!=null&&cur!=null?+(cur-prev).toFixed(1):null;
-}
-function slope(a){
-  const pts=a.w.map((v,i)=>v!=null?[i,v]:null).filter(Boolean);
-  if(pts.length<2)return 0;
-  const n=pts.length,sx=pts.reduce((s,p)=>s+p[0],0),sy=pts.reduce((s,p)=>s+p[1],0);
-  const sxy=pts.reduce((s,p)=>s+p[0]*p[1],0),sxx=pts.reduce((s,p)=>s+p[0]*p[0],0);
-  return +((n*sxy-sx*sy)/(n*sxx-sx*sx)).toFixed(2);
-}
-function classify(a,wIdx){
-  const v=getAgentAvg(a,wIdx),s=slope(a);
-  if(v==null)return{cat:"No Data",color:"#555"};
-  if(v>=GOAL&&s>=0)return{cat:"Stable",color:"#4ade80"};
-  if(v>=GOAL&&s<0)return{cat:"Monitor",color:"#facc15"};
-  if(v<GOAL&&v>=60&&s>0)return{cat:"Convertible",color:"#38bdf8"};
-  if(v<GOAL&&v>=60&&s<=0)return{cat:"Stagnant",color:"#fb923c"};
-  if(v<GOAL&&v>=60&&s<-1)return{cat:"Regressing",color:"#f87171"};
-  if(v<60)return{cat:"Critical",color:"#ef4444"};
-  return{cat:"Convertible",color:"#38bdf8"};
-}
-function distTo72(a,wIdx){const v=getAgentAvg(a,wIdx);return v!=null?+(GOAL-v).toFixed(1):null;}
-function weeksTo72(a,wIdx){const d=distTo72(a,wIdx),s=slope(a);return d!=null&&d>0&&s>0?Math.ceil(d/s):null;}
-function project(a,weeks){
-  const s=slope(a),last=a.w.filter(v=>v!=null).pop();
-  if(last==null)return[];
-  return Array.from({length:weeks},(_,i)=>Math.min(100,Math.max(0,+(last+s*(i+1)).toFixed(1))));
-}
-function wowDelta(agents,wIdx){
-  if(wIdx<1)return null;
-  const cur=[],prev=[];
-  agents.forEach(a=>{
-    if(a.w[wIdx]!=null)cur.push(a.w[wIdx]);
-    if(a.w[wIdx-1]!=null)prev.push(a.w[wIdx-1]);
-  });
-  if(!cur.length||!prev.length)return null;
-  return +((cur.reduce((s,v)=>s+v,0)/cur.length)-(prev.reduce((s,v)=>s+v,0)/prev.length)).toFixed(1);
-}
-function scImpact(a){
-  const below=SCS.filter(c=>(a.sc[c]||0)<70).map(c=>({code:c,name:SC_FULL[c],val:a.sc[c]||0,gap:70-(a.sc[c]||0)}));
-  return below.sort((a,b)=>b.gap-a.gap);
-}
-function genFocusCards(level,context,wIdx){
-  const cards=[];
-  if(level==="campaign"){
-    const allAgents=D.tls.flatMap(t=>t.agents);
-    const atGoal=allAgents.filter(a=>a.w[wIdx]!=null&&a.w[wIdx]>=GOAL).length;
-    const convertible=allAgents.filter(a=>{const c=classify(a,wIdx);return c.cat==="Convertible";});
-    const critical=allAgents.filter(a=>classify(a,wIdx).cat==="Critical");
-    cards.push({title:"Compliance Rate",value:allAgents.length?Math.round(atGoal/allAgents.length*100)+"%":"N/A",
-      sub:atGoal+" of "+allAgents.length+" agents at "+GOAL+"+",color:"#4ade80",icon:"✓"});
-    if(convertible.length)cards.push({title:"Convertible Pipeline",value:convertible.length+" agents",
-      sub:"Positive trend, below "+GOAL,color:"#38bdf8",icon:"↑",action:"Convertible"});
-    if(critical.length)cards.push({title:"Critical Agents",value:critical.length,
-      sub:critical.slice(0,3).map(a=>a.n).join(", "),color:"#ef4444",icon:"⚠",action:"Critical"});
-  } else if(level==="tl"&&context){
-    const t=context;
-    const avg=t.agents.filter(a=>a.w[wIdx]!=null);
-    const mean=avg.length?(avg.reduce((s,a)=>s+a.w[wIdx],0)/avg.length).toFixed(1):"N/A";
-    cards.push({title:"Team Average",value:mean,sub:avg.length+" evaluated this week",color:"#38bdf8",icon:"⌀"});
-    const conv=t.agents.filter(a=>classify(a,wIdx).cat==="Convertible");
-    if(conv.length){const top=conv.sort((a,b)=>(b.w[wIdx]||0)-(a.w[wIdx]||0))[0];
-      cards.push({title:"Fastest Path",value:top.n,sub:"Score "+top.w[wIdx]+" — only "+distTo72(top,wIdx)+" pts to "+GOAL,color:"#4ade80",icon:"⇡"});}
-  } else if(level==="agent"&&context){
-    const a=context;
-    const s=slope(a),cat=classify(a,wIdx);
-    cards.push({title:"Trend",value:(s>=0?"+":"")+s+" pts/wk",sub:cat.cat,color:cat.color,icon:s>=0?"↗":"↘"});
-    const proj=project(a,4);
-    if(proj.length)cards.push({title:"Projection",value:proj[proj.length-1],sub:"Est. in 4 weeks",color:proj[proj.length-1]>=GOAL?"#4ade80":"#fb923c",icon:"⇢"});
-    const weak=scImpact(a);
-    if(weak[0])cards.push({title:"Top Lever",value:weak[0].name,sub:weak[0].val+"% Met — "+weak[0].gap+"pt gap",color:"#a78bfa",icon:"⚙"});
-    const wk=weeksTo72(a,wIdx);
-    if(wk&&(a.w[wIdx]||0)<GOAL)cards.push({title:"Path to "+GOAL,value:"~"+wk+" weeks",sub:"At current rate (+"+s+"/wk)",color:"#38bdf8",icon:"⏱"});
-  }
-  return cards;
-}
-
-const C={bg:"#0b1120",panel:"#0f1729",card:"#131d33",border:"#1c2a42",text:"#e2e8f0",dim:"#94a3b8",
-  muted:"#475569",cyan:"#06b6d4",blue:"#3b82f6",green:"#34d399",red:"#f87171",amber:"#fbbf24",
-  purple:"#a78bfa",orange:"#f97316",teal:"#14b8a6"};
-const cs={background:C.card,borderRadius:12,border:"1px solid "+C.border,padding:16};
-
-function sheetCsvUrl(sheetId,tabName){
-  const base="https://docs.google.com/spreadsheets/d/"+sheetId+"/gviz/tq?tqx=out:csv";
-  return tabName?base+"&sheet="+encodeURIComponent(tabName):base;
-}
-async function fetchFromSheets(qaSheetId,rosterSheetId,surveySheetId){
-  const qaResp=await fetch(sheetCsvUrl(qaSheetId));
-  if(!qaResp.ok) throw new Error("Failed to fetch QA data ("+qaResp.status+"). Make sure the sheet is shared.");
-  const qaText=await qaResp.text();
-  const tabKeys=["leadership","ccMexico","ccJamaica","act"];
-  const rosterTabs={};
-  for(let i=0;i<ROSTER_TABS.length;i++){
-    try{
-      const resp=await fetch(sheetCsvUrl(rosterSheetId,ROSTER_TABS[i]));
-      if(resp.ok) rosterTabs[tabKeys[i]]=await resp.text();
-    }catch(e){console.warn("Could not fetch tab:",ROSTER_TABS[i],e);}
-  }
-  if(!rosterTabs.leadership) throw new Error("Could not fetch Leadership tab from roster.");
-  const result=processFiles(qaText,rosterTabs);
-  let surveyData={agents:{},total:0,avgRating:0,responseRate:0};
-  if(surveySheetId){
-    try{
-      const sResp=await fetch(sheetCsvUrl(surveySheetId));
-      if(sResp.ok)surveyData=processSurveys(await sResp.text());
-    }catch(e){console.warn("Survey fetch failed:",e);}
-  }
-  return{...result,surveyData, raw: {qaText, rosterTabs}};
-}
-
+// --- ESTRUCTURA GENERAL DE HELPERS VISUALES ---
 function Tp({active,payload,label}){
   if(!active||!payload)return null;
   return <div style={{background:C.panel,border:"1px solid "+C.border,borderRadius:8,padding:"8px 12px",fontSize:11}}>
@@ -637,1250 +356,42 @@ function useSort(defaultKey,defaultDir="desc"){
   return{sk,sd,toggle,sortFn};
 }
 
-function DonutChart({value,total,color,size=64}){
-  const pct=total?value/total:0;
-  const r=(size-6)/2;
-  const c=2*Math.PI*r;
-  return <svg width={size} height={size} style={{transform:"rotate(-90deg)"}}>
-    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.border} strokeWidth={3}/>
-    <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={3}
-      strokeDasharray={c} strokeDashoffset={c*(1-pct)} strokeLinecap="round" style={{transition:"stroke-dashoffset .8s ease"}}/>
-  </svg>;
-}
+// ─────────────────────────────────────────────
+// COMPONENTE: PESTAÑA TREND ANALYSIS (NUEVA)
+// ─────────────────────────────────────────────
+function TrendsTab({ wIdx, rawInts, site, tls }) {
+  const currentStats = useMemo(() => getCampaignSCStats(rawInts, site, D.weekISO[wIdx], tls), [rawInts, site, wIdx, tls]);
+  const prevStats = useMemo(() => getCampaignSCStats(rawInts, site, D.weekISO[wIdx - 1], tls), [rawInts, site, wIdx, tls]);
 
-function RiskBadge({level}){
-  const colors={HIGH:C.red,MEDIUM:C.amber,LOW:C.green};
-  return <span style={{fontSize:9,fontWeight:700,padding:"2px 8px",borderRadius:10,
-    background:(colors[level]||C.dim)+"18",color:colors[level]||C.dim,letterSpacing:"0.5px"}}>{level}</span>;
-}
-function TabButton({label,active,onClick,badge}){
-  return <button onClick={onClick} style={{fontSize:11,fontWeight:active?700:500,padding:"8px 16px",
-    borderRadius:6,border:"none",cursor:"pointer",transition:"all .15s",
-    background:active?C.cyan+"15":"transparent",color:active?C.cyan:C.dim,position:"relative"}}>
-    {label}
-    {badge>0&&<span style={{position:"absolute",top:2,right:2,fontSize:8,fontWeight:700,
-      background:C.red,color:"#fff",borderRadius:10,padding:"1px 5px",minWidth:14,textAlign:"center"}}>{badge}</span>}
-  </button>;
-}
-
-function CommandPalette({ isOpen, onClose, tls, onSelectAgent }) {
-  const [cmdSearch, setCmdSearch] = useState("");
-  const inputRef = useRef(null);
-  useEffect(() => { 
-    if (isOpen) { setCmdSearch(""); setTimeout(() => inputRef.current?.focus(), 50); }
-  }, [isOpen]);
-  if (!isOpen) return null;
-  const results = tls.flatMap(t => t.agents.filter(a => a.n.toLowerCase().includes(cmdSearch.toLowerCase())).map(a => ({a, t}))).slice(0, 5);
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",zIndex:9999,display:"flex",justifyContent:"center",paddingTop:"15vh"}} onClick={onClose}>
-    <div onClick={e=>e.stopPropagation()} style={{background:C.panel,border:"1px solid "+C.border,borderRadius:12,width:500,maxWidth:"90%",overflow:"hidden",boxShadow:"0 10px 40px rgba(0,0,0,0.5)", height:"max-content"}}>
-      <div style={{padding:16,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:12}}>
-        <span style={{fontSize:18,color:C.cyan}}>{"⚡"}</span>
-        <input ref={inputRef} value={cmdSearch} onChange={e=>setCmdSearch(e.target.value)} placeholder="Type an agent's name..." style={{flex:1,background:"transparent",border:"none",color:C.text,fontSize:16,outline:"none"}} onKeyDown={e=>{if(e.key==="Escape")onClose(); if(e.key==="Enter" && results.length) {onSelectAgent(results[0].a, results[0].t); onClose();}}}/>
-        <span style={{fontSize:10,color:C.dim,background:C.bg,padding:"2px 6px",borderRadius:4}}>ESC to close</span>
+  return (
+    <div style={{...cs}}>
+      <div style={{fontSize:14, fontWeight:700, marginBottom:20, color:C.text}}>
+        Service Commitments: Weekly Trend ({site === "all" ? "Campaign" : site})
       </div>
-      {cmdSearch && results.length > 0 && <div style={{padding:8}}>
-        {results.map(({a,t}, i) => <div key={i} onClick={()=>{onSelectAgent(a,t); onClose();}} style={{padding:"10px 12px",borderRadius:8,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",background:i===0?C.cyan+"15":"transparent", border:i===0?"1px solid "+C.cyan+"44":"1px solid transparent"}} onMouseEnter={e=>{e.currentTarget.style.background=C.cyan+"15";}} onMouseLeave={e=>{if(i!==0)e.currentTarget.style.background="transparent";}}>
-          <span style={{fontWeight:600,fontSize:13}}>{a.n}</span>
-          <span style={{fontSize:10,color:C.dim}}>{t.name} · {a.w[LATEST_WIDX]||"--"} QA</span>
-        </div>)}
-      </div>}
-      {cmdSearch && results.length === 0 && <div style={{padding:24,textAlign:"center",color:C.dim,fontSize:12}}>No agents found</div>}
-    </div>
-  </div>;
-}
-
-const SC_GROUPS=[
-  {label:"Customer Experience",codes:["WW","TL","VT","AP"]},
-  {label:"Problem Resolution",codes:["RB","OW","AI"]},
-  {label:"Professionalism & Values",codes:["PR","LV","SS"]}
-];
-
-function ScoreGauge({score,size=80}){
-  const pct=Math.min(100,Math.max(0,score))/100;
-  const r=(size-8)/2;
-  const circumference=2*Math.PI*r;
-  const scoreOffset=circumference*(1-pct);
-  const clr=score>=GOAL?C.green:score>=60?C.amber:C.red;
-  return <div style={{position:"relative",width:size,height:size}}>
-    <svg width={size} height={size} style={{transform:"rotate(-90deg)"}}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.border} strokeWidth={4}/>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={clr} strokeWidth={4} strokeDasharray={circumference} strokeDashoffset={scoreOffset} strokeLinecap="round" style={{transition:"stroke-dashoffset .6s ease"}}/>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={C.green+"44"} strokeWidth={1} strokeDasharray={`${circumference*(GOAL/100)} ${circumference*(1-GOAL/100)}`}/>
-    </svg>
-    <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-      <span style={{fontSize:size*0.28,fontWeight:800,fontFamily:"monospace",color:clr,lineHeight:1}}>{score}</span>
-      <span style={{fontSize:8,color:C.dim}}>/ 100</span>
-    </div>
-  </div>;
-}
-
-function InteractionModal({interactions,onClose}){
-  const[idx,setIdx]=useState(0);
-  const[expandedFb,setExpandedFb]=useState({});
-  const int=interactions[idx];
-  const comments=int.comments||{};
-  const commentKeys=Object.keys(comments);
-
-  const issues=[];
-  SCS.forEach(c=>{
-    const val=int.sc?.[c];
-    if(val==="Did Not Meet")issues.push({name:SC_FULL[c],status:"fail"});
-    else if(val==="Met Some")issues.push({name:SC_FULL[c],status:"partial"});
-  });
-  if(!int.proc)issues.push({name:"Procedures",status:"fail"});
-  if(!int.notes)issues.push({name:"Notes",status:"fail"});
-
-  const toggleFb=(key)=>setExpandedFb(p=>({...p,[key]:!p[key]}));
-
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onClose}>
-    <div onClick={e=>e.stopPropagation()} style={{background:C.panel,borderRadius:16,border:"1px solid "+C.border,maxWidth:680,width:"100%",maxHeight:"70vh",display:"flex",flexDirection:"column",overflow:"hidden",padding:0}}>
-      <div style={{padding:"14px 24px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap"}}>
-          <span style={{fontSize:14,fontWeight:700}}>{int.agent}</span>
-          <span style={{fontSize:10,color:C.dim}}>{int.qa} {"·"} {(int.channel||"").toUpperCase()} {"·"} {safeDate(int.date).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</span>
-        </div>
-        <div style={{display:"flex",gap:6,alignItems:"center"}}>
-          {int.assignmentId&&<a href={"https://crateandbarrel.stellaconnect.net/qa/reviews/"+int.assignmentId} target="_blank" rel="noopener noreferrer" style={{padding:"5px 12px",borderRadius:5,background:C.cyan+"15",border:"1px solid "+C.cyan+"33",color:C.cyan,fontSize:10,fontWeight:600,textDecoration:"none"}}>{"↗"} Stella</a>}
-          {int.url&&<a href={int.url} target="_blank" rel="noopener noreferrer" style={{padding:"5px 12px",borderRadius:5,background:C.purple+"15",border:"1px solid "+C.purple+"33",color:C.purple,fontSize:10,fontWeight:600,textDecoration:"none"}}>{"↗"} Gladly</a>}
-          <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer",marginLeft:4}}>{"✕"}</button>
-        </div>
-      </div>
-      <div style={{padding:"20px 24px", flex: 1, overflowY:"auto", minHeight: 0}}>
-        {interactions.length>1&&<div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
-          {interactions.map((it,i)=><button key={i} onClick={()=>{setIdx(i);setExpandedFb({});}} style={{fontSize:10,padding:"4px 10px",borderRadius:4,border:"1px solid "+(i===idx?C.cyan:C.border),background:i===idx?C.cyan+"15":C.card,color:i===idx?C.cyan:C.dim,cursor:"pointer"}}>{safeDate(it.date).toLocaleDateString("en-US",{month:"short",day:"numeric"})} {"—"} {it.score}</button>)}
-        </div>}
-        <div style={{display:"flex",alignItems:"center",gap:20,marginBottom:20}}>
-          <ScoreGauge score={int.score} size={90}/>
-          <div>
-            <div style={{fontSize:10,color:C.dim,marginBottom:4}}>Distance to target ({GOAL})</div>
-            {int.score>=GOAL?
-              <div style={{fontSize:13,fontWeight:600,color:C.green}}>{"✓"} At or above goal</div>:
-              <div>
-                <div style={{fontSize:13,fontWeight:600,color:int.score>=60?C.amber:C.red}}>{GOAL-int.score} points below</div>
-                <div style={{width:140,height:4,background:C.border,borderRadius:2,marginTop:6,overflow:"hidden"}}><div style={{width:Math.round(int.score/GOAL*100)+"%",height:"100%",borderRadius:2,background:int.score>=60?C.amber:C.red}}></div></div>
-              </div>}
-          </div>
-        </div>
-        {issues.length>0&&<div style={{marginBottom:16,padding:"10px 14px",borderRadius:8,background:C.red+"08",border:"1px solid "+C.red+"20"}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>{"⚠"} Key Issues ({issues.length})</div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:6}}>{issues.map((iss,i)=><span key={i} style={{fontSize:10,padding:"3px 8px",borderRadius:4,background:iss.status==="fail"?C.red+"15":C.amber+"15",color:iss.status==="fail"?C.red:C.amber,fontWeight:600}}>{iss.name}{iss.status==="partial"?" (Partial)":""}</span>)}</div>
-        </div>}
-        <div style={{marginBottom:16}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:10,textTransform:"uppercase",letterSpacing:"0.5px"}}>Service Commitments</div>
-          {SC_GROUPS.map((g,gi)=><div key={gi} style={{marginBottom:10}}>
-            <div style={{fontSize:9,fontWeight:600,color:C.muted,marginBottom:4,paddingLeft:4}}>{g.label}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-              {g.codes.map(c=>{const val=int.sc?.[c];const met=val==="Met"||val==="Exceed";const partial=val==="Met Some";
-                return <div key={c} style={{padding:"7px 10px",borderRadius:5,fontSize:10,background:met?C.green+"08":partial?C.amber+"08":C.red+"08",borderLeft:"3px solid "+(met?C.green:partial?C.amber:C.red),display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{color:C.text}}>{SC_FULL[c]}</span><span style={{fontWeight:700,fontSize:9,color:met?C.green:partial?C.amber:C.red}}>{met?"Met":partial?"Partial":"Not Met"}</span></div>;})}
-            </div>
-          </div>)}
-          <div style={{fontSize:9,fontWeight:600,color:C.muted,marginBottom:4,paddingLeft:4}}>Process & Compliance</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-            [["Follows Procedures",int.proc],["Notes in Gladly",int.notes]].map(([lbl,val])=><div key={lbl} style={{padding:"7px 10px",borderRadius:5,fontSize:10,background:val?C.green+"08":C.red+"08",borderLeft:"3px solid "+(val?C.green:C.red),display:"flex",justifyContent:"space-between"}}><span>{lbl}</span><span style={{fontWeight:700,fontSize:9,color:val?C.green:C.red}}>{val?"Met":"Not Met"}</span></div>)
-          </div>
-        </div>
-        {commentKeys.length>0?<div style={{marginBottom:8}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>QA Feedback ({commentKeys.length})</div>
-          {commentKeys.map((q,i)=>{
-            const text=comments[q];const isLong=text.length>120;const expanded=expandedFb[q];const displayText=isLong&&!expanded?text.substring(0,120)+"...":text;
-            return <div key={i} style={{padding:"10px 14px",borderRadius:6,background:C.bg,marginBottom:6,borderLeft:"2px solid "+C.cyan+"44"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}><span style={{fontSize:9,color:C.cyan,fontWeight:700}}>{q}</span>{isLong&&<button onClick={()=>toggleFb(q)} style={{fontSize:9,color:C.cyan,background:"none",border:"none",cursor:"pointer",textDecoration:"underline"}}>{expanded?"Collapse":"Read more"}</button>}</div><div style={{fontSize:11,color:C.text,lineHeight:1.6}}>{displayText}</div></div>;})}
-        </div>:<div style={{padding:"12px 14px",borderRadius:6,background:C.bg,marginBottom:8}}><span style={{fontSize:10,color:C.muted,fontStyle:"italic"}}>No written feedback for this evaluation</span></div>}
-      </div>
-    </div>
-  </div>;
-}
-
-// =================================================================
-// NUEVO: QA PROFILE PANEL (Deep Dive for Evaluators) - CON KEYWORDS & WRITING GUIDE
-// =================================================================
-function QAProfilePanel({qaName, wIdx, rawInts, onClose, onViewInteraction, isMobile}) {
-  const [tab, setTab] = useState("bias");
-  const [fbFilter, setFbFilter] = useState("All");
-  
-  const targetWeek = D.weekISO[wIdx];
-  const allWeekInts = (rawInts || []).filter(int => getWeekStart(int.date) === targetWeek);
-  const qaInts = allWeekInts.filter(int => int.qa === qaName);
-  
-  if(!qaInts.length) return null;
-
-  let totalScore = 0, criticalFails = 0, totalValidMins = 0, validEvals = 0;
-  const channelCounts = {};
-  const allComments = [];
-  const catDeductions = {};
-  SCS.forEach(c => catDeductions[c] = { deducts: 0, total: 0 });
-
-  let qaProcTotal = 0, qaProcFails = 0, qaNotesTotal = 0, qaNotesFails = 0;
-
-  const globalCommentFreq = {};
-  allWeekInts.forEach(int => {
-    Object.values(int.comments || {}).forEach(c => {
-      const txt = c.trim();
-      if(txt) globalCommentFreq[txt] = (globalCommentFreq[txt]||0) + 1;
-    });
-  });
-
-  qaInts.forEach(int => {
-    totalScore += int.score;
-    if(int.score < 50) criticalFails++;
-    channelCounts[int.channel] = (channelCounts[int.channel]||0) + 1;
-    if (int.duration >= 1 && int.duration <= 120) { totalValidMins += int.duration; validEvals++; }
-    
-    Object.entries(int.comments || {}).forEach(([qText, text]) => {
-      if(text.trim()) {
-        const code = SC_MAP[qText];
-        let isDeduction = false;
-        let category = "Other";
-
-        if (code) {
-          category = SC_FULL[code];
-          const val = int.sc?.[code];
-          if (val && val !== "Met" && val !== "Exceed") isDeduction = true;
-        } else if (qText === "Follows Procedures") {
-          category = "Follows Procedures";
-          if (int.proc === false) isDeduction = true;
-        } else if (qText.includes("Notes in Gladly")) {
-          category = "Notes in Gladly";
-          if (int.notes === false) isDeduction = true;
-        }
-
-        allComments.push({ agent: int.agent, text: text.trim(), length: text.trim().length, date: int.date, score: int.score, qText, category, isDeduction });
-      }
-    });
-
-    SCS.forEach(c => {
-      const val = int.sc?.[c];
-      if (val) {
-        catDeductions[c].total++;
-        if (val !== "Met" && val !== "Exceed") catDeductions[c].deducts++;
-      }
-    });
-
-    if (int.proc !== null) { qaProcTotal++; if (!int.proc) qaProcFails++; }
-    if (int.notes !== null) { qaNotesTotal++; if (!int.notes) qaNotesFails++; }
-  });
-
-  const rawCommentsArray = qaInts.flatMap(int => Object.values(int.comments || {}).map(c => c.trim()).filter(Boolean));
-  const writingMetrics = analyzeQAFeedback(rawCommentsArray, globalCommentFreq);
-
-  const avgScore = +(totalScore / qaInts.length).toFixed(1);
-  const avgAHT = validEvals > 0 ? Math.round(totalValidMins / validEvals) : 0;
-  allComments.sort((a,b) => new Date(b.date) - new Date(a.date));
-  const anomalies = qaInts.filter(i => i.duration > 0 && i.duration < 2);
-
-  const teamDeductions = {};
-  SCS.forEach(c => teamDeductions[c] = { deducts: 0, total: 0 });
-  let teamProcTotal = 0, teamProcFails = 0, teamNotesTotal = 0, teamNotesFails = 0;
-
-  allWeekInts.forEach(int => {
-     SCS.forEach(c => {
-       const val = int.sc?.[c];
-       if(val) {
-         teamDeductions[c].total++;
-         if (val !== "Met" && val !== "Exceed") teamDeductions[c].deducts++;
-       }
-     });
-     if (int.proc !== null) { teamProcTotal++; if (!int.proc) teamProcFails++; }
-     if (int.notes !== null) { teamNotesTotal++; if (!int.notes) teamNotesFails++; }
-  });
-
-  const radarData = SCS.map(c => {
-    const qaRate = catDeductions[c].total > 0 ? Math.round((catDeductions[c].deducts / catDeductions[c].total)*100) : 0;
-    const teamRate = teamDeductions[c].total > 0 ? Math.round((teamDeductions[c].deducts / teamDeductions[c].total)*100) : 0;
-    return { subject: SC_FULL[c], "QA Deduction %": qaRate, "Team Avg %": teamRate };
-  });
-
-  const qaProcRate = qaProcTotal > 0 ? Math.round((qaProcFails / qaProcTotal) * 100) : 0;
-  const teamProcRate = teamProcTotal > 0 ? Math.round((teamProcFails / teamProcTotal) * 100) : 0;
-  const qaNotesRate = qaNotesTotal > 0 ? Math.round((qaNotesFails / qaNotesTotal) * 100) : 0;
-  const teamNotesRate = teamNotesTotal > 0 ? Math.round((teamNotesFails / teamNotesTotal) * 100) : 0;
-
-  const parts = qaName.split(" ");
-  const ini = (parts[0]?.[0]||"")+(parts[parts.length-1]?.[0]||"");
-
-  const tabSt=(t)=>({fontSize:11,fontWeight:tab===t?700:500,padding:"8px 16px",cursor:"pointer", color:tab===t?C.purple:C.dim,borderBottom:tab===t?"2px solid "+C.purple:"2px solid transparent", background:"none",border:"none",transition:"all .15s"});
-
-  const goToFeedback = (category) => {
-    setFbFilter(category);
-    setTab("feedback");
-  };
-
-  const displayedComments = fbFilter === "All" 
-    ? allComments 
-    : allComments.filter(c => c.category === fbFilter && c.isDeduction);
-
-  const availableCategories = ["All", ...new Set(allComments.filter(c => c.isDeduction).map(c => c.category))];
-
-  const ClickableTick = (props) => {
-    const { x, y, payload, textAnchor } = props;
-    return (
-      <text x={x} y={y} textAnchor={textAnchor} fill={C.dim} fontSize={9} 
-        style={{cursor:"pointer", transition:"all 0.2s"}} 
-        onMouseEnter={e=>{e.target.style.fill=C.purple; e.target.style.fontWeight="bold";}} 
-        onMouseLeave={e=>{e.target.style.fill=C.dim; e.target.style.fontWeight="normal";}} 
-        onClick={() => goToFeedback(payload.value)}>
-        {payload.value}
-      </text>
-    );
-  };
-
-  const getTopKeywords = (commentsArray) => {
-    if (!commentsArray || commentsArray.length === 0) return [];
-    const stopWords = new Set(["the","be","to","of","and","a","in","that","have","i","it","for","not","on","with","he","as","you","do","at","this","but","his","by","from","they","we","say","her","she","or","an","will","my","one","all","would","there","their","what","so","up","out","if","about","who","get","which","go","me","when","make","can","like","time","no","just","him","know","take","people","into","year","your","good","some","could","them","see","other","than","then","now","look","only","come","its","over","think","also","back","after","use","two","how","our","work","first","well","way","even","new","want","because","any","these","give","day","most","us","de","la","que","el","en","y","a","los","del","se","las","por","un","para","con","no","una","su","al","lo","como","más","pero","sus","le","ya","o","este","sí","porque","esta","entre","cuando","muy","sin","sobre","también","me","hasta","hay","donde","quien","desde","todo","nos","durante","todos","uno","les","ni","contra","otros","ese","eso","ante","ellos","e","esto","mí","antes","algunos","qué","unos","yo","otro","otras","otra","él","tanto","esa","estos","mucho","quienes","nada","muchos","cual","poco","ella","estar","estas","algunas","algo","nosotros","mi","mis","tú","te","ti","tu","tus","ellas","nosotras","vosotros","vosotras","os","mío","mía","míos","mías","tuyo","tuya","tuyos","tuyas","suyo","suya","suyos","suyas","nuestro","nuestra","nuestros","nuestras","vuestro","vuestra","vuestros","vuestras","esos","esas","estoy","estás","está","estamos","estáis","están","esté","estés","estemos","estéis","estén","estaré","estarás","estará","estaremos","estaréis","estarán","estaría","estarías","estaríamos","estaríais","estarían","estaba","estabas","estábamos","estabais","estaban","estuve","estuviste","estuvimos","estuvisteis","estuvieron","estuviera","estuvieras","estuviéramos","estubierais","estuvieran","estuviese","estuvieses","estuviésemos","estuvieseis","estuviesen","estando","estado","estada","estados","estadas","estad","he","has","ha","hemos","habéis","han","haya","hayas","hayamos","hayáis","hayan","habré","habrás","habrá","habremos","habréis","habrán","habría","habrías","habríamos","habríais","habrían","había","habías","habíamos","habíais","habían","hube","hubiste","hubo","hubimos","hubisteis","hubieron","hubiera","hubieras","hubiéramos","hubierais","hubieran","hubiese","hubieses","hubiésemos","hubieseis","hubiesen","habiendo","habido","habida","habidos","habidas","soy","eres","es","somos","sois","son","sea","seas","seamos","seáis","sean","seré","serás","será","serremos","seréis","serán","sería","serías","seríamos","seríais","serían","era","eras","éramos","erais","eran","fui","fuiste","fue","fuimos","fuisteis","fueron","fuera","fueras","fuéramos","fuerais","fueran","fuese","fueses","fuésemos","fueseis","fuesen","siendo","sido","tengo","tienes","tiene","tenemos","tenéis","tienen","tenga","tengas","tengamos","tengáis","tengan","tendré","tendrás","tendrá","tendremos","tendréis","tendrán","tendría","tendrías","tendríamos","tendríais","tendrían","tenía","tenías","teníamos","teníais","tenían","tuve","tuviste","tuvo","tuvimos","tuvisteis","tuvieron","tuviera","tuvieras","tuviéramos","tuvierais","tuvieran","tuviese","tuvieses","tuviésemos","tuvieseis","tuviesen","teniendo","tenido","tenida","tenidos","tenidas","tened","customer","client","agente","agent","call","llamada","interaction","interaccion","interact","conversation","did","was","were","is","are","has","had"]);
-
-    const wordCounts = {};
-    commentsArray.forEach(c => {
-      if (c.isDeduction) {
-        const words = c.text.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()]/g,"").split(/\s+/);
-        words.forEach(w => {
-          if (w.length > 3 && !stopWords.has(w)) {
-            wordCounts[w] = (wordCounts[w] || 0) + 1;
-          }
-        });
-      }
-    });
-
-    return Object.entries(wordCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 7)
-      .map(entry => ({ word: entry[0], count: entry[1] }));
-  };
-
-  const topKeywords = getTopKeywords(displayedComments);
-
-  // Filtramos los dupes únicos para no mostrar la misma frase 5 veces en la vista
-  const uniqueDupes = [];
-  const seenDupeTexts = new Set();
-  allComments.forEach(c => {
-    if(globalCommentFreq[c.text] >= DUPE_THRESHOLD && !seenDupeTexts.has(c.text)) {
-      seenDupeTexts.add(c.text);
-      uniqueDupes.push({ text: c.text, count: globalCommentFreq[c.text] });
-    }
-  });
-
-  return <div style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:0, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
-    <div style={{padding:"20px 24px 0",borderBottom:"1px solid "+C.border}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{width:42,height:42,borderRadius:"50%",background:C.purple+"20",border:"2px solid "+C.purple+"44", display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700,color:C.purple}}>{ini}</div>
-          <div>
-            <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>QA Auditor Deep Dive</div>
-            <h2 style={{fontSize:17,fontWeight:700,margin:"2px 0 0"}}>{qaName}</h2>
-          </div>
-        </div>
-        <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer"}}>{"✕"}</button>
-      </div>
-      <div style={{display:"flex",gap:0, overflowX: "auto"}}>
-        <button onClick={()=>setTab("bias")} style={tabSt("bias")}>Calibration</button>
-        <button onClick={()=>setTab("feedback")} style={tabSt("feedback")}>Feedback Log</button>
-        <button onClick={()=>setTab("ops")} style={tabSt("ops")}>Operations</button>
-        <button onClick={()=>setTab("writing")} style={tabSt("writing")}>Writing Guide</button>
-      </div>
-    </div>
-
-    <div style={{padding:"16px 24px 24px"}}>
-      {tab === "bias" && <>
-         <div style={{display:"flex", gap:10, marginBottom:16}}>
-            <div style={{...cs, flex:1, padding:12, borderColor:C.purple+"44", background:C.purple+"08"}}>
-               <div style={{fontSize:9, color:C.purple, fontWeight:700, textTransform:"uppercase"}}>Avg Score Given</div>
-               <div style={{fontSize:24, fontWeight:800, color:C.text, fontFamily:"monospace", marginTop:4}}>{avgScore}</div>
-            </div>
-            <div style={{...cs, flex:1, padding:12}}>
-               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Total Evals</div>
-               <div style={{fontSize:24, fontWeight:800, color:C.text, fontFamily:"monospace", marginTop:4}}>{qaInts.length}</div>
-            </div>
-         </div>
-         
-         <div style={{...cs, marginBottom:16}}>
-            <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
-              <div style={{fontSize:11,fontWeight:600,color:C.dim}}>Deduction Bias Radar</div>
-              <div style={{fontSize:8,color:C.purple, background:C.purple+"15", padding:"2px 6px", borderRadius:4}}>💡 Click a label to view comments</div>
-            </div>
-            <ResponsiveContainer width="100%" height={240}>
-              <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-                <PolarGrid stroke={C.border} />
-                <PolarAngleAxis dataKey="subject" tick={<ClickableTick />} />
-                <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{fontSize:8, fill:C.muted}} />
-                <Radar name="QA Deduction %" dataKey="QA Deduction %" stroke={C.red} fill={C.red} fillOpacity={0.4} />
-                <Radar name="Team Avg %" dataKey="Team Avg %" stroke={C.cyan} fill={C.cyan} fillOpacity={0.2} />
-                <Legend wrapperStyle={{fontSize: 10}} />
-                <Tooltip contentStyle={{background:C.panel, border:"1px solid "+C.border, fontSize:10}} />
-              </RadarChart>
-            </ResponsiveContainer>
-         </div>
-         
-         <div style={{...cs, marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Process & Compliance Deduction Bias</div>
-            <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:16}}>
-              <div onClick={() => goToFeedback("Follows Procedures")} style={{cursor:"pointer", padding:"6px", borderRadius:6, transition:"background 0.2s", margin:"-6px"}} onMouseEnter={e=>e.currentTarget.style.background=C.purple+"15"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600, display:"flex", justifyContent:"space-between"}}>
-                  Follows Procedures <span style={{fontSize:9, color:C.purple}}>🔍 View</span>
-                </div>
-                <div style={{display:"flex", gap:8, alignItems:"center", marginBottom:4}}>
-                  <span style={{fontSize:9, color:C.red, width:24}}>QA</span>
-                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:qaProcRate+"%", background:C.red, height:"100%", borderRadius:3}}></div></div>
-                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.red}}>{qaProcRate}%</span>
-                </div>
-                <div style={{display:"flex", gap:8, alignItems:"center"}}>
-                  <span style={{fontSize:9, color:C.cyan, width:24}}>Team</span>
-                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:teamProcRate+"%", background:C.cyan, height:"100%", borderRadius:3}}></div></div>
-                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.cyan}}>{teamProcRate}%</span>
-                </div>
+      <div style={{display: "flex", flexDirection: "column", gap: 5}}>
+        {currentStats.map(stat => {
+          const prev = prevStats.find(p => p.code === stat.code);
+          const delta = prev ? stat.pct - prev.pct : 0;
+          return (
+            <div key={stat.code} style={{display: "flex", alignItems: "center", padding: "12px 0", borderBottom: "1px solid " + C.border}}>
+              <div style={{width: 160, fontSize: 11, fontWeight: 600, color: C.dim}}>{stat.name}</div>
+              <div style={{flex: 1, height: 8, background: C.bg, borderRadius: 4, marginRight: 20, overflow: "hidden"}}>
+                <div style={{width: stat.pct+"%", height: "100%", background: stat.pct >= 70 ? C.green : C.amber, transition: "width 0.8s ease-in-out"}}></div>
               </div>
-              
-              <div onClick={() => goToFeedback("Notes in Gladly")} style={{cursor:"pointer", padding:"6px", borderRadius:6, transition:"background 0.2s", margin:"-6px"}} onMouseEnter={e=>e.currentTarget.style.background=C.purple+"15"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                <div style={{fontSize:10, color:C.text, marginBottom:6, fontWeight:600, display:"flex", justifyContent:"space-between"}}>
-                  Notes in Gladly <span style={{fontSize:9, color:C.purple}}>🔍 View</span>
-                </div>
-                <div style={{display:"flex", gap:8, alignItems:"center", marginBottom:4}}>
-                  <span style={{fontSize:9, color:C.red, width:24}}>QA</span>
-                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:qaNotesRate+"%", background:C.red, height:"100%", borderRadius:3}}></div></div>
-                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.red}}>{qaNotesRate}%</span>
-                </div>
-                <div style={{display:"flex", gap:8, alignItems:"center"}}>
-                  <span style={{fontSize:9, color:C.cyan, width:24}}>Team</span>
-                  <div style={{flex:1, background:C.bg, height:5, borderRadius:3}}><div style={{width:teamNotesRate+"%", background:C.cyan, height:"100%", borderRadius:3}}></div></div>
-                  <span style={{fontSize:9, fontFamily:"monospace", width:24, textAlign:"right", color:C.cyan}}>{teamNotesRate}%</span>
-                </div>
+              <div style={{width: 50, textAlign: "right", fontSize: 13, fontWeight: 800, fontFamily: "monospace"}}>{stat.pct}%</div>
+              <div style={{width: 90, textAlign: "right", fontSize: 11, fontWeight: 700, color: delta >= 0 ? C.green : C.red}}>
+                 {delta > 0 ? "▲ +" : delta < 0 ? "▼ " : "— "} {Math.abs(delta)}pts
               </div>
             </div>
-         </div>
-      </>}
-
-      {tab === "writing" && <>
-         <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16}}>
-            <div style={{...cs, padding:12, borderColor: writingMetrics.alignScore >= 70 ? C.green+"44" : writingMetrics.alignScore >= 50 ? C.amber+"44" : C.red+"44", background: writingMetrics.alignScore >= 70 ? C.green+"08" : writingMetrics.alignScore >= 50 ? C.amber+"08" : C.red+"08"}}>
-               <div style={{fontSize:9, color:C.text, fontWeight:700, textTransform:"uppercase"}}>Alignment Score</div>
-               <div style={{fontSize:28, fontWeight:800, color: writingMetrics.alignScore >= 70 ? C.green : writingMetrics.alignScore >= 50 ? C.amber : C.red, fontFamily:"monospace", marginTop:4}}>{writingMetrics.alignScore}</div>
-               <div style={{fontSize:9, color:C.dim, marginTop:4}}>Guía de Escritura C&B</div>
-            </div>
-            <div style={{...cs, padding:12}}>
-               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Copy-Paste Rate</div>
-               <div style={{fontSize:28, fontWeight:800, color: writingMetrics.copyRate > 15 ? C.red : C.text, fontFamily:"monospace", marginTop:4}}>{Math.round(writingMetrics.copyRate)}%</div>
-               <div style={{fontSize:9, color:C.dim, marginTop:4}}>{Math.round(writingMetrics.copyRate/100 * rawCommentsArray.length)} comentarios repetidos</div>
-            </div>
-         </div>
-
-         <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16}}>
-            <div style={{...cs, padding:12}}>
-               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase", marginBottom:8}}>Formula Pt. 2 (Impact)</div>
-               <div style={{width:"100%", background:C.bg, height:6, borderRadius:3}}><div style={{width: Math.min(100, writingMetrics.impactRate)+"%", background: writingMetrics.impactRate >= 50 ? C.green : C.red, height:"100%", borderRadius:3}}></div></div>
-               <div style={{fontSize:10, color:C.text, fontFamily:"monospace", marginTop:6}}>{Math.round(writingMetrics.impactRate)}% <span style={{color:C.dim, fontSize:9}}>included</span></div>
-            </div>
-            <div style={{...cs, padding:12}}>
-               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase", marginBottom:8}}>Formula Pt. 3 (Resource)</div>
-               <div style={{width:"100%", background:C.bg, height:6, borderRadius:3}}><div style={{width: Math.min(100, writingMetrics.resourceRate)+"%", background: writingMetrics.resourceRate >= 10 ? C.green : C.amber, height:"100%", borderRadius:3}}></div></div>
-               <div style={{fontSize:10, color:C.text, fontFamily:"monospace", marginTop:6}}>{Math.round(writingMetrics.resourceRate)}% <span style={{color:C.dim, fontSize:9}}>included</span></div>
-            </div>
-         </div>
-
-         {Object.keys(writingMetrics.avoidHits).length > 0 && (
-           <div style={{...cs, marginBottom:16, borderLeft: "3px solid " + C.red}}>
-             <div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:8}}>Avoid Phrases Detected</div>
-             {Object.entries(writingMetrics.avoidHits).map(([phrase, count], i) => (
-               <div key={i} style={{display:"flex", justifyContent:"space-between", padding:"4px 0", borderBottom:"1px solid "+C.border+"33"}}>
-                 <span style={{fontSize:10, color:C.text}}>{phrase}</span>
-                 <span style={{fontSize:10, fontWeight:700, color:C.red, fontFamily:"monospace"}}>{count}x</span>
-               </div>
-             ))}
-           </div>
-         )}
-
-         {uniqueDupes.length > 0 && (
-           <div style={{...cs, marginBottom:16}}>
-             <div style={{fontSize:11,fontWeight:600,color:C.amber,marginBottom:8}}>Top Copy-Paste Templates</div>
-             {uniqueDupes.sort((a,b) => b.count - a.count).slice(0,5).map((dupe, i) => (
-               <div key={i} style={{padding:"8px 12px", background:C.bg, borderRadius:6, marginBottom:6, borderLeft:"2px solid "+C.amber+"66"}}>
-                 <div style={{fontSize:9, color:C.amber, fontWeight:700, marginBottom:4}}>Used {dupe.count} times across team</div>
-                 <div style={{fontSize:10, color:C.dim, fontStyle:"italic"}}>{dupe.text.substring(0, 100)}...</div>
-               </div>
-             ))}
-           </div>
-         )}
-      </>}
-
-      {tab === "feedback" && <>
-         <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>
-           {fbFilter === "All" ? `Recent Feedback Left (${allComments.length})` : `Deduction Filter: ${fbFilter} (${displayedComments.length})`}
-         </div>
-         
-         <div style={{display:"flex", gap:6, marginBottom:12, overflowX:"auto", paddingBottom:4}}>
-           {availableCategories.map(cat => (
-             <button key={cat} onClick={() => setFbFilter(cat)} 
-               style={{fontSize:9, padding:"4px 10px", borderRadius:12, whiteSpace:"nowrap", cursor:"pointer", border: fbFilter === cat ? "1px solid "+C.purple : "1px solid "+C.border, background: fbFilter === cat ? C.purple+"15" : C.bg, color: fbFilter === cat ? C.purple : C.dim, fontWeight: fbFilter === cat ? 700 : 500}}>
-               {cat}
-             </button>
-           ))}
-         </div>
-
-         {topKeywords.length > 0 && (
-           <div style={{marginBottom:16, padding:"12px 14px", background:C.purple+"08", border:"1px solid "+C.purple+"22", borderRadius:8}}>
-             <div style={{fontSize:10, fontWeight:700, color:C.purple, textTransform:"uppercase", marginBottom:8, letterSpacing:0.5}}>
-               🎯 Top Deduction Keywords
-             </div>
-             <div style={{display:"flex", flexWrap:"wrap", gap:8}}>
-               {topKeywords.map((kw, i) => (
-                 <div key={i} style={{display:"flex", alignItems:"center", background:C.panel, border:"1px solid "+C.border, borderRadius:6, padding:"2px 8px", fontSize:10}}>
-                   <span style={{color:C.text, marginRight:6}}>{kw.word}</span>
-                   <span style={{color:C.purple, fontWeight:700, fontFamily:"monospace"}}>{kw.count}</span>
-                 </div>
-               ))}
-             </div>
-           </div>
-         )}
-
-         {displayedComments.length > 0 ? <div style={{display:"flex",flexDirection:"column",gap:8}}>
-             {displayedComments.slice(0, 30).map((c, i) => {
-               const isPoor = c.length < 30;
-               return <div key={i} style={{...cs, padding:12, borderLeft: isPoor ? "3px solid "+C.red : "3px solid "+C.green}}>
-                  <div style={{display:"flex", justifyContent:"space-between", marginBottom:6}}>
-                     <span style={{fontSize:10, fontWeight:700, color:C.text}}>To: {c.agent} <span style={{color:C.dim, fontWeight:400, marginLeft:4}}>({c.score})</span></span>
-                     <span style={{fontSize:9, padding:"2px 6px", borderRadius:4, background: isPoor?C.red+"1a":C.green+"1a", color:isPoor?C.red:C.green}}>{c.length} chars {isPoor?"(Poor)":"(Good)"}</span>
-                  </div>
-                  {fbFilter === "All" && c.isDeduction && <div style={{fontSize:8, color:C.purple, marginBottom:4, fontWeight:600}}>DEDUCTION: {c.category}</div>}
-                  <div style={{fontSize:11, color:C.dim, fontStyle:"italic", lineHeight:1.4}}>"{c.text}"</div>
-               </div>
-             })}
-         </div> : <EmptyState message={fbFilter === "All" ? "No comments left this week" : `No deduction comments found for ${fbFilter}`} />}
-      </>}
-
-      {tab === "ops" && <>
-         <div style={{display:"flex", gap:10, marginBottom:16}}>
-            <div style={{...cs, flex:1, padding:12}}>
-               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Avg Handle Time</div>
-               <div style={{fontSize:24, fontWeight:800, color:C.text, fontFamily:"monospace", marginTop:4}}>{avgAHT} <span style={{fontSize:12}}>m</span></div>
-            </div>
-            <div style={{...cs, flex:1, padding:12, borderColor: criticalFails>5?C.red+"44":C.border}}>
-               <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Fatal Evals ({"<"}50)</div>
-               <div style={{fontSize:24, fontWeight:800, color:criticalFails>5?C.red:C.text, fontFamily:"monospace", marginTop:4}}>{criticalFails}</div>
-            </div>
-         </div>
-         <div style={{...cs, marginBottom:16}}>
-            <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Channel Breakdown</div>
-            {Object.entries(channelCounts).map(([ch, count]) => (
-               <div key={ch} style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
-                  <span style={{fontSize:10, fontWeight:600, textTransform:"uppercase"}}>{ch}</span>
-                  <div style={{display:"flex", alignItems:"center", gap:8}}>
-                     <div style={{width:100, height:6, background:C.bg, borderRadius:3}}><div style={{width: (count/qaInts.length)*100+"%", height:"100%", background:C.cyan, borderRadius:3}}></div></div>
-                     <span style={{fontSize:10, fontFamily:"monospace", width:20, textAlign:"right"}}>{count}</span>
-                  </div>
-               </div>
-            ))}
-         </div>
-         <div style={{...cs}}>
-            <div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:12}}>{"⚠"} Speedruns / Anomalies ({"<"}2 mins)</div>
-            {anomalies.length > 0 ? anomalies.map((an, i) => (
-               <div key={i} onClick={()=>onViewInteraction([an])} style={{display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:"1px solid "+C.border+"33", cursor:"pointer"}}>
-                  <div>
-                     <div style={{fontSize:10, fontWeight:600, color:C.text}}>{an.agent}</div>
-                     <div style={{fontSize:9, color:C.dim}}>{safeDate(an.date).toLocaleDateString()}</div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                     <div style={{fontSize:10, fontWeight:700, color:C.red}}>{an.duration.toFixed(1)} mins</div>
-                     <div style={{fontSize:9, color:C.dim}}>Score: {an.score}</div>
-                  </div>
-               </div>
-            )) : <span style={{fontSize:10, color:C.dim}}>No speedruns detected.</span>}
-         </div>
-      </>}
-    </div>
-  </div>
-}
-
-// =================================================================
-// TL PROFILE PANEL
-// =================================================================
-function TLProfilePanel({ tl, wIdx, rawInts, onClose, isMobile }) {
-  if (!tl) return null;
-  const scored = tl.agents.filter(a => a.w[wIdx] != null);
-  const avg = scored.length ? +(scored.reduce((s, a) => s + a.w[wIdx], 0) / scored.length).toFixed(1) : 0;
-  const trend = wowDelta(tl.agents, wIdx);
-  const atGoal = scored.filter(a => a.w[wIdx] >= GOAL).length;
-  const pctGoal = scored.length ? Math.round((atGoal / scored.length) * 100) : 0;
-  
-  const criticals = tl.agents.filter(a => classify(a, wIdx).cat === "Critical");
-  const convertibles = tl.agents.filter(a => classify(a, wIdx).cat === "Convertible");
-
-  const trendData = WEEKS.map((wk, i) => {
-    const s = tl.agents.filter(a => a.w[i] != null);
-    return { wk, score: s.length ? +(s.reduce((sum, a) => sum + a.w[i], 0) / s.length).toFixed(1) : null };
-  }).filter(d => d.score != null);
-
-  const scAvgs = SCS.map(c => {
-    const vals = tl.agents.map(a => a.sc[c]).filter(v => v != null);
-    return { code: c, name: SC_FULL[c], val: vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : 0 };
-  });
-  const topStrengths = [...scAvgs].sort((a, b) => b.val - a.val).slice(0, 3);
-  const topOpps = [...scAvgs].sort((a, b) => a.val - b.val).slice(0, 3);
-
-  const targetWeek = D.weekISO[wIdx];
-  const tlEvals = (rawInts || []).filter(int => getWeekStart(int.date) === targetWeek && tl.agents.some(a => a.n === int.agent || a.email === int.email));
-  const evalsCount = tlEvals.length;
-
-  const initials = (tl.name.split(" ")[0]?.[0] || "") + (tl.name.split(" ")[tl.name.split(" ").length - 1]?.[0] || "");
-
-  return <div style={{width: isMobile ? "100%" : 460, minWidth: isMobile ? "100%" : 460, background:C.panel, borderLeft: isMobile ? "none" : "1px solid "+C.border, overflowY:"auto", padding:0, height: isMobile ? "100vh" : "calc(100vh - 120px)", position: isMobile ? "fixed" : "sticky", top:0, left: isMobile ? 0 : "auto", zIndex: isMobile ? 50 : 1}}>
-    <div style={{padding:"20px 24px 20px", borderBottom:"1px solid "+C.border}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <div style={{width:42,height:42,borderRadius:"50%",background:C.orange+"20",border:"2px solid "+C.orange+"44", display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700,color:C.orange}}>{initials}</div>
-          <div>
-            <div style={{fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:"1px"}}>Leadership Profile</div>
-            <h2 style={{fontSize:17,fontWeight:700,margin:"2px 0 0"}}>{tl.name}</h2>
-            <div style={{fontSize:10,color:C.dim,marginTop:1}}>{tl.site} {"·"} {tl.agents.length} Agents</div>
-          </div>
-        </div>
-        <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,fontSize:16,cursor:"pointer"}}>{"✕"}</button>
+          );
+        })}
       </div>
     </div>
-
-    <div style={{padding:"16px 24px 24px"}}>
-      <div style={{display:"flex", gap:10, marginBottom:16}}>
-        <div style={{...cs, flex:1, padding:12, borderColor: avg >= GOAL ? C.green+"44" : C.border, background: avg >= GOAL ? C.green+"08" : C.card}}>
-          <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Team Avg Score</div>
-          <div style={{display:"flex", alignItems:"flex-end", gap:8, marginTop:4}}>
-            <span style={{fontSize:26, fontWeight:800, color: avg >= GOAL ? C.green : C.text, fontFamily:"monospace", lineHeight:1}}>{avg}</span>
-            {trend != null && <WoWBadge delta={trend} />}
-          </div>
-        </div>
-        <div style={{...cs, flex:1, padding:12}}>
-           <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Total Evals</div>
-           <div style={{fontSize:26, fontWeight:800, color:C.text, fontFamily:"monospace", lineHeight:1, marginTop:4}}>{evalsCount}</div>
-        </div>
-      </div>
-
-      <div style={{...cs, padding:12, marginBottom:16}}>
-        <div style={{fontSize:9, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Goal Attainment</div>
-        <div style={{fontSize:26, fontWeight:800, color:C.text, fontFamily:"monospace", lineHeight:1, marginTop:4}}>{pctGoal}%</div>
-        <div style={{fontSize:9, color:C.dim, marginTop:4}}>{atGoal} of {scored.length} agents {"≥"} {GOAL}</div>
-      </div>
-
-      <div style={{...cs, marginBottom:16}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Team Historical Trend</div>
-        <ResponsiveContainer width="100%" height={140}>
-          <AreaChart data={trendData}>
-            <defs><linearGradient id="tlGr" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.orange} stopOpacity={0.2}/><stop offset="100%" stopColor={C.orange} stopOpacity={0.01}/></linearGradient></defs>
-            <CartesianGrid stroke={C.border+"40"} strokeDasharray="3 3"/>
-            <XAxis dataKey="wk" tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false}/>
-            <YAxis domain={[0,100]} tick={{fontSize:8,fill:C.muted}} axisLine={false} tickLine={false} width={26}/>
-            <ReferenceLine y={GOAL} stroke={C.green+"55"} strokeDasharray="4 4"/>
-            <Area type="monotone" dataKey="score" stroke={C.orange} fill="url(#tlGr)" strokeWidth={2} dot={{r:3,fill:C.orange}}/>
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:16}}>
-        <div style={{...cs, borderLeft:"3px solid "+C.green}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.green,marginBottom:8}}>Top Strengths</div>
-          {topStrengths.map((s,i) => <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:4}}><span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:110}}>{s.name}</span><span style={{fontWeight:700,fontFamily:"monospace",color:C.green}}>{s.val}%</span></div>)}
-        </div>
-        <div style={{...cs, borderLeft:"3px solid "+C.red}}>
-          <div style={{fontSize:10,fontWeight:700,color:C.red,marginBottom:8}}>Team Bottlenecks</div>
-          {topOpps.map((s,i) => <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:4}}><span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:110}}>{s.name}</span><span style={{fontWeight:700,fontFamily:"monospace",color:C.red}}>{s.val}%</span></div>)}
-        </div>
-      </div>
-
-      <div style={{...cs}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:12}}>Agent Distribution</div>
-        <div style={{display:"flex", justifyContent:"space-between", marginBottom:8, paddingBottom:8, borderBottom:"1px solid "+C.border+"55"}}>
-          <div style={{fontSize:10}}><span style={{color:C.red, fontWeight:700}}>● Criticals:</span> {criticals.length}</div>
-          <div style={{fontSize:10}}><span style={{color:C.cyan, fontWeight:700}}>● Convertibles:</span> {convertibles.length}</div>
-        </div>
-        {criticals.length > 0 && <div style={{fontSize:10, color:C.dim, marginTop:8}}>
-          <span style={{color:C.text, fontWeight:600}}>At Risk: </span> 
-          {criticals.map(a=>a.n).join(", ")}
-        </div>}
-      </div>
-    </div>
-  </div>;
-}
-
-// =================================================================
-// LEADERSHIP TAB (TL Analytics Overview)
-// =================================================================
-function LeadershipTab({ tls, wIdx, onSelectLeader }) {
-  const leadSort = useSort("avg");
-  
-  const tlStats = tls.map(tl => {
-    const scored = tl.agents.filter(a => a.w[wIdx] != null);
-    const avg = scored.length ? +(scored.reduce((s, a) => s + a.w[wIdx], 0) / scored.length).toFixed(1) : 0;
-    const trend = wowDelta(tl.agents, wIdx);
-    const atGoal = scored.filter(a => a.w[wIdx] >= GOAL).length;
-    const pctGoal = scored.length ? Math.round((atGoal / scored.length) * 100) : 0;
-    const criticals = tl.agents.filter(a => classify(a, wIdx).cat === "Critical").length;
-    return { ...tl, avg, trend, pctGoal, criticals, scoredCount: scored.length };
-  }).filter(t => t.scoredCount > 0);
-
-  const bestTL = [...tlStats].sort((a,b) => b.avg - a.avg)[0];
-  const mostImprovedTL = [...tlStats].filter(t => t.trend != null).sort((a,b) => b.trend - a.trend)[0];
-
-  const barData = [...tlStats].sort((a,b) => b.avg - a.avg).map(t => ({ name: t.name.split(" ")[0], fullName: t.name, avg: t.avg, fill: t.avg >= GOAL ? C.green : t.avg >= 60 ? C.amber : C.red }));
-
-  return <div>
-    <HistoricalBanner wIdx={wIdx}/>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      <KpiCard value={tlStats.length} label="Active Leaders" color={C.orange} icon={"👥"}/>
-      <KpiCard value={bestTL ? bestTL.avg : "--"} label="Top Performing TL" sub={bestTL ? bestTL.name : ""} color={C.green} icon={"🏆"}/>
-      <KpiCard value={mostImprovedTL && mostImprovedTL.trend > 0 ? "+"+mostImprovedTL.trend : "--"} label="Most Improved TL" sub={mostImprovedTL ? mostImprovedTL.name : ""} color={C.cyan} icon={"🚀"}/>
-    </div>
-
-    <div style={{...cs, marginBottom:16}}>
-      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:16}}>Leadership Performance Ranking</div>
-      <ResponsiveContainer width="100%" height={220}>
-        <BarChart data={barData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
-          <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3" vertical={false}/>
-          <XAxis dataKey="name" tick={{fontSize:10,fill:C.dim}} axisLine={false} tickLine={false}/>
-          <YAxis domain={[0,100]} tick={{fontSize:10,fill:C.dim}} axisLine={false} tickLine={false}/>
-          <Tooltip cursor={{fill:C.border+"33"}} contentStyle={{background:C.panel, border:"1px solid "+C.border, fontSize:11, borderRadius:8}}/>
-          <ReferenceLine y={GOAL} stroke={C.green+"66"} strokeDasharray="4 4" label={{value:`Goal ${GOAL}`, position:"insideTopLeft", fill:C.green, fontSize:10}} />
-          <Bar dataKey="avg" radius={[4,4,0,0]} name="Team Avg">
-            {barData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-
-    <div style={{...cs, overflowX: "auto"}}>
-      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Team Leader Matrix</div>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "600px"}}>
-        <SortHeader columns={[["name","Team Leader"],["site","Site",80],["scoredCount","Agents",80],["avg","Team Avg",100],["trend","WoW Trend",100],["pctGoal","% At Goal",100],["criticals","Criticals",100]]} sortKey={leadSort.sk} sortDir={leadSort.sd} onSort={leadSort.toggle}/>
-        <tbody>{tlStats.sort((a,b)=>leadSort.sortFn(a[leadSort.sk],b[leadSort.sk])).map((t,i) => (
-          <tr key={i} onClick={() => onSelectLeader(t)} style={{borderBottom:"1px solid "+C.border+"22", cursor:"pointer", transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=C.orange+"0a"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            <td style={{padding:"10px 12px",fontWeight:600, color:C.text}}>{t.name}</td>
-            <td style={{padding:"10px 12px", color:C.dim}}>{t.site}</td>
-            <td style={{padding:"10px 12px", fontFamily:"monospace", color:C.dim}}>{t.scoredCount}</td>
-            <td style={{padding:"10px 12px", fontWeight:800, fontFamily:"monospace", color: t.avg >= GOAL ? C.green : t.avg >= 60 ? C.amber : C.red}}>{t.avg}</td>
-            <td style={{padding:"10px 12px"}}>{t.trend != null && <WoWBadge delta={t.trend}/>}</td>
-            <td style={{padding:"10px 12px", fontFamily:"monospace"}}>
-              <div style={{display:"flex", alignItems:"center", gap:6}}>
-                <div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:t.pctGoal+"%", height:"100%", background:C.cyan, borderRadius:2}}></div></div>
-                <span>{t.pctGoal}%</span>
-              </div>
-            </td>
-            <td style={{padding:"10px 12px", fontFamily:"monospace", color: t.criticals > 2 ? C.red : C.dim}}>{t.criticals} {t.criticals > 2 && "⚠"}</td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
-  </div>;
-}
-
-// =================================================================
-// DASHBOARD VIEWS
-// =================================================================
-function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csatFindings,site,filteredTLs, isMobile}){
-  const tlSort=useSort("avg");
-  const allAgents=filteredTLs.flatMap(t=>t.agents);
-  const scored=allAgents.filter(a=>a.w[wIdx]!=null);
-  const avg=scored.length?(scored.reduce((s,a)=>s+a.w[wIdx],0)/scored.length).toFixed(1):"--";
-  const atGoal=scored.filter(a=>a.w[wIdx]>=GOAL).length;
-  const pct72=scored.length?Math.round(atGoal/scored.length*100):0;
-  const wow=wowDelta(allAgents,wIdx);
-  const critical=allAgents.filter(a=>classify(a,wIdx).cat==="Critical");
-  const catCounts={};
-  allAgents.forEach(a=>{const c=classify(a,wIdx);catCounts[c.cat]=(catCounts[c.cat]||0)+1;});
-  const catData=Object.entries(catCounts).map(([cat,count])=>{
-    const colors={Stable:"#4ade80",Monitor:"#facc15",Convertible:"#38bdf8",Stagnant:"#fb923c",Regressing:"#f87171",Critical:"#ef4444","No Data":"#555"};
-    return{cat,count,color:colors[cat]||"#555"};});
-  const trendData=WEEKS.map((wk,i)=>{const s=allAgents.filter(a=>a.w[i]!=null);
-    return{wk,avg:s.length?+(s.reduce((sum,a)=>sum+a.w[i],0)/s.length).toFixed(1):null};});
-
-  const initials=(name)=>{const p=name.split(" ");return(p[0]?.[0]||"")+(p[p.length-1]?.[0]||"");};
-  const siteColors={HMO:"#3b82f6",JAM:"#a78bfa",PAN:"#f59e0b"};
-  const mostImproved = getMostImprovedAgents(allAgents, wIdx);
-
-  return <div>
-    <HistoricalBanner wIdx={wIdx}/>
-    <div style={{display:"flex", flexDirection: isMobile ? "column" : "row", gap:16, marginBottom:16}}>
-      <div style={{width: isMobile ? "100%" : "380px", flexShrink: 0, display:"flex",flexDirection:"column",gap:12}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-              <div style={{fontSize:10,color:"#6ee7b7",fontWeight:500}}>QA Score</div>
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 14l4-4 3 3 5-7" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </div>
-            <div style={{fontSize:32,fontWeight:800,color:"#34d399",fontFamily:"'Geist Mono',monospace",letterSpacing:"-2px",lineHeight:1,marginTop:6}}>{avg}</div>
-            <div style={{marginTop:4}}>{wow!=null&&<WoWBadge delta={wow}/>}</div>
-            <div style={{fontSize:9,color:"#6ee7b7",marginTop:4,opacity:.7}}>Goal {"≥"} score of {GOAL}</div>
-          </div>
-          <div style={{background:C.card,borderRadius:12,border:"1px solid "+C.border,padding:16,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <div>
-              <div style={{fontSize:10,color:C.dim,fontWeight:500}}>{"≥"} {GOAL}</div>
-              <div style={{fontSize:28,fontWeight:800,color:C.text,fontFamily:"'Geist Mono',monospace",letterSpacing:"-1px",lineHeight:1,marginTop:6}}>{pct72}%</div>
-            </div>
-            <div style={{position:"relative"}}>
-              <DonutChart value={atGoal} total={scored.length} color={C.green} size={52}/>
-              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:10,fontWeight:700,fontFamily:"monospace",color:C.green}}>{pct72}%</span></div>
-            </div>
-          </div>
-        </div>
-        <div onClick={()=>setCatFilter(catFilter==="Critical"?null:"Critical")} style={{background:"#2a0f0f",borderRadius:12,border:"1px solid #4a1c1c",padding:16,cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>e.currentTarget.style.background="#331414"} onMouseLeave={e=>e.currentTarget.style.background="#2a0f0f"}>
-          <div style={{fontSize:10,color:"#fca5a5",fontWeight:500,marginBottom:4}}>Critical Agents</div>
-          <div style={{fontSize:28,fontWeight:800,color:"#f87171",fontFamily:"'Geist Mono',monospace",letterSpacing:"-1px",lineHeight:1}}>{critical.length}</div>
-          <div style={{fontSize:10,color:"#fca5a5",marginTop:6,opacity:.8,lineHeight:1.3}}>{critical.slice(0,3).map(a=>a.n).join(", ")}{critical.length>3?" +"+String(critical.length-3)+" more":""}</div>
-        </div>
-        {mostImproved.length > 0 && (
-          <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
-            <div style={{fontSize:10,color:"#6ee7b7",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>🔥 Most Improved Agents</div>
-            {mostImproved.map((mi, i) => (
-               <div key={i} onClick={() => { const t = filteredTLs.find(tl => tl.agents.some(x => x.n === mi.n)); if(t) onSelectAgent(mi.a, t); }} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",cursor:"pointer",borderBottom:i<mostImproved.length-1?"1px solid #1a4a32":"none"}} onMouseEnter={e=>e.currentTarget.style.opacity=0.8} onMouseLeave={e=>e.currentTarget.style.opacity=1}>
-                 <span style={{fontSize:11,color:C.text,fontWeight:600}}>{mi.n}</span>
-                 <span style={{fontSize:10,color:C.green,fontWeight:700}}>+{mi.imp} <span style={{color:C.green,opacity:0.6}}>({mi.cur})</span></span>
-               </div>
-            ))}
-          </div>
-        )}
-        {csatFindings&&csatFindings.length>0&&<div style={{...cs,flex:1}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>CSAT-QA Insights</div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {csatFindings.slice(0,5).map((f,i)=>{
-              const sev=f.severity; const clr=sev==="critical"?C.red:sev==="warning"?C.amber:C.teal; const ic=sev==="critical"?"⛔":sev==="warning"?"⚠":"ℹ";
-              return <div key={i} style={{padding:"10px 12px",borderRadius:8,background:clr+"06",border:"1px solid "+clr+"18", borderLeft:"3px solid "+clr,display:"flex",gap:10,alignItems:"flex-start",transition:"background .15s"}} onMouseEnter={e=>{e.currentTarget.style.background=clr+"10";}} onMouseLeave={e=>{e.currentTarget.style.background=clr+"06";}}>
-                <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{ic}</span>
-                <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:700,color:C.text}}>{f.agent}</div><div style={{fontSize:10,color:clr,lineHeight:1.4,marginTop:2}}>{f.msg}</div></div>
-              </div>;})}
-          </div>
-        </div>}
-      </div>
-      <div style={{flex: 1, display:"flex",flexDirection:"column",gap:12, minWidth: 0}}>
-        <div style={{...cs}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Weekly Score Trend</div>
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={trendData}>
-              <defs><linearGradient id="campG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.cyan} stopOpacity={0.12}/><stop offset="100%" stopColor={C.cyan} stopOpacity={0.01}/></linearGradient></defs>
-              <CartesianGrid stroke={C.border+"40"} strokeDasharray="3 3"/>
-              <XAxis dataKey="wk" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
-              <YAxis domain={[0,100]} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} width={32}/>
-              <Tooltip content={<Tp/>}/>
-              <ReferenceLine y={GOAL} stroke={C.green+"55"} strokeDasharray="6 3" label={{value:"Goal "+GOAL,position:"right",fill:C.dim,fontSize:10}}/>
-              <Area type="monotone" dataKey="avg" name="Avg Score" stroke={C.cyan} fill="url(#campG)" strokeWidth={2.5} dot={{r:4,fill:C.cyan,stroke:C.bg,strokeWidth:2}} activeDot={{r:6,fill:C.cyan,stroke:"#fff",strokeWidth:2}}/>
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",gap:12}}>
-          <div style={{...cs}}>
-            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Agent Categories</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-              {catData.sort((a,b)=>b.count-a.count).slice(0,6).map(d=><div key={d.cat} onClick={()=>setCatFilter(catFilter===d.cat?null:d.cat)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"10px 4px",borderRadius:8,cursor:"pointer", background:catFilter===d.cat?d.color+"12":"transparent",border:catFilter===d.cat?"1px solid "+d.color+"33":"1px solid transparent",transition:"all .15s"}} onMouseEnter={e=>{if(catFilter!==d.cat)e.currentTarget.style.background=d.color+"08";}} onMouseLeave={e=>{if(catFilter!==d.cat)e.currentTarget.style.background="transparent";}}>
-                <div style={{position:"relative"}}><DonutChart value={d.count} total={scored.length} color={d.color} size={56}/><div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:d.color}}>{d.count}</span></div></div>
-                <span style={{fontSize:9,color:catFilter===d.cat?d.color:C.dim,fontWeight:500,textAlign:"center"}}>{d.cat}</span>
-              </div>)}
-            </div>
-            {catFilter&&<div style={{textAlign:"center",marginTop:8}}><button onClick={()=>setCatFilter(null)} style={{fontSize:9,color:C.cyan,background:C.cyan+"10",border:"1px solid "+C.cyan+"33",borderRadius:12,padding:"4px 14px",cursor:"pointer"}}>Clear filter</button></div>}
-          </div>
-          <div style={{...cs,overflowX:"auto"}}>
-            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Team Lead Rankings</div>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-              <thead><tr style={{borderBottom:"1px solid "+C.border}}>
-                {["Team Lead","","Avg","Trend",""].map((h,hi)=><th key={hi} style={{textAlign:"left",padding:"6px 8px",color:C.dim,fontWeight:600,fontSize:9}}>{h}</th>)}
-              </tr></thead>
-              <tbody>{filteredTLs.map((t,i)=>{
-                const ta=t.agents.filter(a=>a.w[wIdx]!=null);
-                const tavg=ta.length?+(ta.reduce((s,a)=>s+a.w[wIdx],0)/ta.length).toFixed(1):0;
-                const tw=wowDelta(t.agents,wIdx); const sc=siteColors[t.site]||C.muted;
-                const rangeLbl=tavg>=GOAL?"72+":tavg>=60?"60-71":tavg<60?("< 60"):"--";
-                const rangeClr=tavg>=GOAL?C.green:tavg>=60?C.amber:C.red; const rangeBg=tavg>=GOAL?"#0c2d1e":tavg>=60?"#2d2206":"#2a0f0f";
-                return <tr key={i} style={{borderBottom:"1px solid "+C.border+"44",cursor:"pointer",transition:"background .1s"}} onMouseEnter={e=>{e.currentTarget.style.background=C.cyan+"06";const b=e.currentTarget.lastElementChild?.firstElementChild;if(b)b.style.opacity="1";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";const b=e.currentTarget.lastElementChild?.firstElementChild;if(b)b.style.opacity="0.4";}} onClick={()=>onSelectTL(t)}>
-                  <td style={{padding:"10px 8px"}}><div style={{fontWeight:600,fontSize:11}}>{t.name}</div></td>
-                  <td style={{padding:"10px 4px"}}><div style={{width:26,height:26,borderRadius:"50%",background:sc+"22",border:"1px solid "+sc+"44", display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:sc}}>{initials(t.name)}</div></td>
-                  <td style={{padding:"10px 8px"}}><span style={{fontWeight:700,fontFamily:"monospace",fontSize:11,padding:"3px 10px",borderRadius:5, background:rangeBg,color:rangeClr,border:"1px solid "+rangeClr+"22"}}>{rangeLbl}</span></td>
-                  <td style={{padding:"10px 8px"}}>{tw!=null&&<WoWBadge delta={tw}/>}</td>
-                  <td style={{padding:"10px 8px"}}><button onClick={e=>{e.stopPropagation();onSelectTL(t);}} style={{fontSize:9,padding:"4px 10px",borderRadius:12,border:"1px solid "+C.cyan+"44", background:C.cyan+"08",color:C.cyan,cursor:"pointer",fontWeight:600,opacity:.4,transition:"opacity .15s"}}>View Agents</button></td>
-                </tr>;})}</tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-    {catFilter&&<div style={{...cs,marginBottom:16, overflowX: "auto"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{catFilter} Agents</div>
-        <button onClick={()=>setCatFilter(null)} style={{fontSize:10,color:C.cyan,background:"none",border:"1px solid "+C.cyan+"44",borderRadius:12,padding:"4px 14px",cursor:"pointer"}}>Show All</button>
-      </div>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "500px"}}>
-        <SortHeader columns={[["name","Agent"],["tl","Team Lead"],["site","Site",50],["score","Score",60],["trend","Trend",60],["risk","Risk",60]]} sortKey={tlSort.sk} sortDir={tlSort.sd} onSort={tlSort.toggle}/>
-        <tbody>{filteredTLs.flatMap(t=>t.agents.filter(a=>classify(a,wIdx).cat===catFilter).map(a=>({a,t,name:a.n,tl:t.name,site:t.site,score:a.w[wIdx]||0,trend:getAgentTrend(a,wIdx)||0,risk:getRiskLevel(a,wIdx).level}))).sort((x,y)=>tlSort.sortFn(x[tlSort.sk],y[tlSort.sk])).map(({a,t},i)=>{
-          const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx),risk=getRiskLevel(a,wIdx);
-          return <tr key={i} onClick={()=>onSelectAgent(a,t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"33"}} onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"06"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            <td style={{padding:"8px",fontWeight:600}}>{a.n}</td><td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.name}</td><td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.site}</td><td style={{padding:"8px",fontWeight:700,fontFamily:"monospace",color:cat.color}}>{a.w[wIdx]||"--"}</td><td style={{padding:"8px"}}>{tr!=null&&<WoWBadge delta={tr}/>}</td><td style={{padding:"8px"}}><RiskBadge level={risk.level}/></td>
-          </tr>;})}</tbody>
-      </table>
-    </div>}
-  </div>;
-}
-
-function TLView({tl,wIdx,onSelectAgent, isMobile}){
-  const agSort=useSort("score");
-  if(!tl)return null;
-  const scored=tl.agents.filter(a=>a.w[wIdx]!=null);
-  if(!scored.length)return <EmptyState message={"No evaluations for "+tl.name+" in week "+WEEKS[wIdx]}/>;
-
-  const avg=(scored.reduce((s,a)=>s+a.w[wIdx],0)/scored.length).toFixed(1);
-  const wow=wowDelta(tl.agents,wIdx);
-  const criticalAgents = tl.agents.filter(a=>classify(a,wIdx).cat==="Critical" || classify(a,wIdx).cat==="Stagnant");
-  const convertibleAgents = tl.agents.filter(a=>classify(a,wIdx).cat==="Convertible").sort((a,b)=>(b.w[wIdx]||0)-(a.w[wIdx]||0));
-  const fastestPath = convertibleAgents[0];
-
-  const scAvgs = SCS.map(c => {
-    const vals = tl.agents.map(a=>a.sc[c]).filter(v=>v!=null);
-    return { code: c, val: vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0 };
-  }).sort((a,b)=>a.val-b.val).slice(0,2);
-
-  const aiText = `Team average ${wow >= 0 ? 'went up by '+wow : 'dropped by '+Math.abs(wow)} pts. Priority focus on ${criticalAgents.length} agents with critical scores${scAvgs[0] ? ` in '${SC_FULL[scAvgs[0].code]}'` : ''}. Tactical coaching recommended ASAP.`;
-
-  return <div>
-    <HistoricalBanner wIdx={wIdx}/>
-    <div style={{background:"linear-gradient(90deg, #111827, #0d131f)", border:"1px solid "+C.cyan+"33", borderRadius:12, padding:16, marginBottom:20, display:"flex", gap:16, boxShadow:"0 4px 20px "+C.cyan+"0a"}}>
-       <div style={{background:C.cyan+"22", padding:"8px 10px", borderRadius:8, fontSize:20, height:"fit-content", border:"1px solid "+C.cyan+"44"}}>✨</div>
-       <div>
-          <div style={{color:C.cyan, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:6}}>AI Executive Summary</div>
-          <div style={{fontSize:13, color:C.text, lineHeight:1.5}}>{aiText}</div>
-       </div>
-    </div>
-    <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))", gap:14, marginBottom:24}}>
-      <div style={{...cs, position:"relative", overflow:"hidden"}}>
-         <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}><div style={{fontSize:10, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Team Avg</div>{wow!=null&&<WoWBadge delta={wow}/>}</div>
-         <div style={{fontSize:32, fontWeight:800, color:"#fff", fontFamily:"'Geist Mono',monospace", marginTop:8}}>{avg}</div>
-         <div style={{width:"100%", background:C.bg, height:6, borderRadius:3, marginTop:12}}><div style={{width: Math.min(100, (avg/GOAL)*100)+"%", background:C.cyan, height:"100%", borderRadius:3}}></div></div>
-         <div style={{display:"flex", justifyContent:"space-between", fontSize:9, color:C.dim, marginTop:6, fontFamily:"monospace"}}><span>Current</span><span>Goal: {GOAL}</span></div>
-      </div>
-      <div style={{...cs, border:"1px solid "+C.red+"44", background:"#1a0f14"}}>
-        <div style={{fontSize:10, color:C.dim, fontWeight:700, textTransform:"uppercase", display:"flex", alignItems:"center", gap:6}}><span style={{color:C.red}}>●</span> Critical Risk</div>
-        <div style={{fontSize:32, fontWeight:800, color:C.red, fontFamily:"'Geist Mono',monospace", marginTop:8}}>{criticalAgents.length}<span style={{fontSize:14, color:C.red, opacity:0.5, fontFamily:"sans-serif", marginLeft:4}}>/ {scored.length}</span></div>
-        <div style={{fontSize:10, color:C.red, opacity:0.8, marginTop:8, lineHeight:1.3}}>Agents stagnated &gt;5pts below goal.</div>
-      </div>
-      <div style={{...cs, borderLeft:"3px solid "+C.cyan}}>
-         <div style={{fontSize:10, color:C.cyan, fontWeight:700, textTransform:"uppercase"}}>⇡ Fastest Path to {GOAL}</div>
-         {fastestPath ? (
-            <><div style={{fontSize:14, fontWeight:700, color:"#fff", marginTop:8, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{fastestPath.n}</div>
-              <div style={{display:"flex", alignItems:"center", gap:8, marginTop:6}}><span style={{fontSize:20, fontWeight:700, fontFamily:"'Geist Mono',monospace", color:C.text}}>{fastestPath.w[wIdx]}</span><span style={{fontSize:10, background:C.cyan+"1a", color:C.cyan, padding:"2px 6px", borderRadius:4, border:"1px solid "+C.cyan+"33"}}>- {(GOAL - fastestPath.w[wIdx]).toFixed(1)} pts</span></div></>
-         ) : <div style={{fontSize:11, color:C.dim, marginTop:8}}>No agents in convertible range</div>}
-      </div>
-      <div style={{...cs}}>
-         <div style={{fontSize:10, color:C.dim, fontWeight:700, textTransform:"uppercase", marginBottom:12}}>Top Bottlenecks</div>
-         {scAvgs.map((b,i) => (
-            <div key={b.code} style={{marginBottom: i===0?12:0}}>
-              <div style={{display:"flex", justifyContent:"space-between", fontSize:10, color:C.text, marginBottom:6}}><span style={{whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:120}}>{SC_FULL[b.code]}</span><span style={{fontFamily:"monospace", color: i===0?C.orange:C.amber, fontWeight:700}}>{b.val.toFixed(0)}%</span></div>
-              <div style={{width:"100%", background:C.bg, height:4, borderRadius:2}}><div style={{width: b.val+"%", background: i===0?C.orange:C.amber, height:"100%", borderRadius:2}}></div></div>
-            </div>
-         ))}
-      </div>
-    </div>
-    <div style={{...cs, padding:0, overflowX: "auto"}}>
-      <div style={{padding:"14px 20px", borderBottom:"1px solid "+C.border, display:"flex", justifyContent:"space-between", alignItems:"center", background:C.bg}}><span style={{fontSize:11, fontWeight:700, color:C.dim, textTransform:"uppercase", letterSpacing:1}}>Agent Rankings</span></div>
-      <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth: "600px"}}>
-        <SortHeader columns={[["name","Agent"],["cat","Category"],["risk","Risk"],["score","Score ▼", 70],["gap","Gap to 72", 80], ["actions","", 80]]} sortKey={agSort.sk} sortDir={agSort.sd} onSort={agSort.toggle}/>
-        <tbody>{[...tl.agents].map(a=>{
-          const c=classify(a,wIdx); const gap = a.w[wIdx] != null ? +(GOAL - a.w[wIdx]).toFixed(1) : null;
-          return{a,name:a.n,score:a.w[wIdx]||0,cat:c.cat, gap: gap, risk:getRiskLevel(a,wIdx).level, color: c.color};}).sort((x,y)=>agSort.sortFn(x[agSort.sk],y[agSort.sk])).map(({a, name, score, cat, gap, risk, color},i)=>{
-          const isCritical = cat === "Critical" || cat === "Stagnant"; const isConvertible = cat === "Convertible"; const rowBg = isCritical ? C.red+"08" : isConvertible ? C.cyan+"08" : "transparent";
-          return <tr key={i} onClick={()=>onSelectAgent(a)} style={{cursor:"pointer", borderBottom:"1px solid "+C.border+"33", background: rowBg, transition:"all .15s"}} onMouseEnter={e=>{e.currentTarget.style.background = isCritical ? C.red+"15" : isConvertible ? C.cyan+"15" : C.cyan+"08";}} onMouseLeave={e=>{e.currentTarget.style.background = rowBg;}}>
-            <td style={{padding:"12px 20px", fontWeight:600, display:"flex", alignItems:"center", gap:8}}>
-              {name} 
-              {isCritical ? <div style={{width:6, height:6, borderRadius:"50%", background:C.red, boxShadow:"0 0 4px "+C.red}}></div> : null} 
-              {(isConvertible && fastestPath && fastestPath.n === name) ? <div style={{width:6, height:6, borderRadius:"50%", background:C.cyan, boxShadow:"0 0 4px "+C.cyan}} title="Fastest Path"></div> : null}
-            </td>
-            <td style={{padding:"12px 20px"}}><span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background:color+"15", color:color, fontWeight:700, textTransform:"uppercase", border:"1px solid "+color+"33", letterSpacing:0.5}}>{cat}</span></td>
-            <td style={{padding:"12px 20px"}}><RiskBadge level={risk}/></td>
-            <td style={{padding:"12px 20px", fontWeight:800, fontFamily:"'Geist Mono',monospace", color:color, fontSize:13}}>{score||"--"}</td>
-            <td style={{padding:"12px 20px", fontFamily:"'Geist Mono',monospace", fontSize:11, color:C.dim}}>{gap !== null ? (gap > 0 ? <span style={{color:C.dim}}>-{gap} pts</span> : <span style={{color:C.green}}>--</span>) : "--"}</td>
-            <td style={{padding:"12px 20px", textAlign:"right"}}>
-              <button onClick={(e)=>{e.stopPropagation(); onSelectAgent(a);}} style={{fontSize:10, fontWeight:700, padding:"6px 14px", borderRadius:6, background:C.cyan+"10", color:C.cyan, border:"1px solid "+C.cyan+"33", cursor:"pointer", textTransform:"uppercase", transition:"all 0.2s"}} onMouseEnter={e=>{e.currentTarget.style.background=C.cyan; e.currentTarget.style.color="#fff";}} onMouseLeave={e=>{e.currentTarget.style.background=C.cyan+"10"; e.currentTarget.style.color=C.cyan;}}>Coach</button>
-            </td>
-          </tr>;})}</tbody>
-      </table>
-    </div>
-  </div>;
-}
-
-function AgentView({agent,tl,wIdx}){
-  if(!agent)return null;
-  const v=agent.w[wIdx],cat=classify(agent,wIdx);
-  if(v==null)return <EmptyState message={"No evaluations for "+agent.n+" in week "+WEEKS[wIdx]}/>;
-  const tr=getAgentTrend(agent,wIdx);
-  const cards=genFocusCards("agent",agent,wIdx);
-  const trendData=agent.w.map((val,i)=>val!=null?{wk:WEEKS[i],score:val}:null).filter(Boolean);
-  const scData=SCS.map(c=>({name:SC_FULL[c],val:agent.sc[c]||0}));
-  return <div>
-    <HistoricalBanner wIdx={wIdx}/>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      <KpiCard value={v} label="Current Score" color={cat.color} delta={tr}/>
-      <KpiCard value={agent.pr+"%"} label="Procedures" color={agent.pr>=70?C.green:C.red}/>
-      <KpiCard value={agent.nt+"%"} label="Notes" color={agent.nt>=70?C.green:C.red}/>
-    </div>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>{cards.map((c,i)=><FocusCard key={i} card={c}/>)}</div>
-    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))",gap:12}}>
-      <div style={{...cs}}><div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Score Trend</div>
-        <ResponsiveContainer width="100%" height={180}>
-          <LineChart data={trendData}>
-            <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/><XAxis dataKey="wk" tick={{fontSize:9,fill:C.muted}} axisLine={false}/><YAxis domain={[0,100]} tick={{fontSize:9,fill:C.muted}} axisLine={false} width={28}/><Tooltip content={<Tp/>}/><ReferenceLine y={GOAL} stroke={C.green+"66"} strokeDasharray="4 4"/><Line type="monotone" dataKey="score" name="Score" stroke={C.cyan} strokeWidth={2} dot={{r:4,fill:C.cyan}}/>
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-      <div style={{...cs}}><div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Service Commitments</div>
-        {scData.map((d,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}><span style={{fontSize:9,color:C.dim,width:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.name}</span><div style={{flex:1,height:6,background:C.bg,borderRadius:3,overflow:"hidden"}}><div style={{width:d.val+"%",height:"100%",borderRadius:3,background:d.val>=70?C.green:d.val>=50?C.amber:C.red}}></div></div><span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:28,textAlign:"right",color:d.val>=70?C.green:d.val>=50?C.amber:C.red}}>{d.val}%</span></div>)}
-      </div>
-    </div>
-  </div>;
-}
-
-// =================================================================
-// TABS: COACHING, QA ANALYTICS, SURVEYS
-// =================================================================
-function CoachingTab({alerts,wIdx,onSelectAgent,tls}){
-  const high=alerts.filter(a=>a.severity==="high"),med=alerts.filter(a=>a.severity==="medium");
-  return <div>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      <KpiCard value={alerts.length} label="Total Alerts" color={C.red} icon={"⚠"}/>
-      <KpiCard value={high.length} label="High Severity" color={C.red}/>
-      <KpiCard value={med.length} label="Medium" color={C.amber}/>
-    </div>
-    {high.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.red}}><div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:8}}>{"⚠"} High Priority</div>{high.map((a,i)=><div key={i} style={{padding:"8px 0",borderBottom:i<high.length-1?"1px solid "+C.border+"22":undefined,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><span style={{fontSize:12,fontWeight:600,cursor:"pointer"}} onClick={()=>{const t=tls.find(t=>t.name===a.tl);const ag=t?.agents.find(x=>x.n===a.agent);if(ag&&t)onSelectAgent(ag,t);}}>{a.agent}</span><span style={{fontSize:10,color:C.dim,marginLeft:8}}>{a.tl}</span></div><span style={{fontSize:10,color:C.red}}>{a.msg}</span></div>)}</div>}
-    {med.length>0&&<div style={{...cs,borderLeft:"3px solid "+C.amber}}><div style={{fontSize:11,fontWeight:600,color:C.amber,marginBottom:8}}>{"⚠"} Monitor</div>{med.map((a,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<med.length-1?"1px solid "+C.border+"22":undefined,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><span style={{fontSize:11,fontWeight:600,cursor:"pointer"}} onClick={()=>{const t=tls.find(t=>t.name===a.tl);const ag=t?.agents.find(x=>x.n===a.agent);if(ag&&t)onSelectAgent(ag,t);}}>{a.agent}</span><span style={{fontSize:10,color:C.dim,marginLeft:8}}>{a.tl}</span></div><span style={{fontSize:10,color:C.amber}}>{a.msg}</span></div>)}</div>}
-    {!alerts.length&&<EmptyState message="No coaching alerts this week."/>}
-  </div>;
-}
-
-function QAAnalyticsTab({wIdx, onSelectQA}){
-  const qaSort = useSort("n");
-  const [view, setView] = useState("calibration"); 
-  
-  const targetWeek = D.weekISO[wIdx];
-  const weekInts = (D.rawInts || []).filter(int => getWeekStart(int.date) === targetWeek);
-
-  const globalCommentFreq = {};
-  weekInts.forEach(int => {
-    Object.values(int.comments || {}).forEach(c => {
-      const txt = c.trim();
-      if(txt) globalCommentFreq[txt] = (globalCommentFreq[txt]||0) + 1;
-    });
-  });
-
-  const qaMap = {};
-  let totalScore = 0;
-
-  weekInts.forEach(int => {
-    if(!qaMap[int.qa]) qaMap[int.qa] = { name: int.qa, scores: [], n: 0, chars: 0, commentsCount: 0, metTotal: 0, metWithNote: 0, criticalFails: 0, totalValidMins: 0, validEvalsCount: 0, rawComments: [] };
-    const q = qaMap[int.qa];
-    q.scores.push(int.score); q.n++; totalScore += int.score;
-    if(int.score < 50) q.criticalFails++;
-    Object.values(int.comments || {}).forEach(c => { 
-      const txt = c.trim();
-      if (txt.length > 0) { 
-        q.chars += txt.length; 
-        q.commentsCount++; 
-        q.rawComments.push(txt);
-      } 
-    });
-    Object.keys(int.comments || {}).forEach(qText => { const code = SC_MAP[qText]; if (code && (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed")) q.metWithNote++; });
-    SCS.forEach(code => { if (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed") q.metTotal++; });
-    if (int.duration >= 1 && int.duration <= 120) { q.totalValidMins += int.duration; q.validEvalsCount++; }
-  });
-
-  const teamAvg = weekInts.length ? +(totalScore / weekInts.length).toFixed(1) : 0;
-
-  const qaData = Object.values(qaMap).map(q => {
-    const avg = +(q.scores.reduce((s,v)=>s+v,0) / q.n).toFixed(1);
-    const sd = +Math.sqrt(q.scores.reduce((s,v)=>s+(v-avg)**2,0) / q.n).toFixed(1);
-    const deviation = +(avg - teamAvg).toFixed(1);
-    const avgChars = q.commentsCount > 0 ? Math.round(q.chars / q.commentsCount) : 0;
-    const metNotePct = q.metTotal > 0 ? Math.round((q.metWithNote / q.metTotal) * 100) : 0;
-    const failRate = q.n > 0 ? Math.round((q.criticalFails / q.n) * 100) : 0;
-    const avgAHT = q.validEvalsCount > 0 ? Math.round(q.totalValidMins / q.validEvalsCount) : 0;
-    
-    const writingMetrics = analyzeQAFeedback(q.rawComments, globalCommentFreq);
-
-    let focusArea = "Calibrated"; let statusColor = C.green;
-    if (deviation < -5) { focusArea = "Too Severe"; statusColor = C.red; }
-    else if (deviation > 5) { focusArea = "Too Lenient"; statusColor = C.amber; }
-    else if (sd > 8) { focusArea = "Inconsistent Criteria"; statusColor = C.orange; }
-    else if (avgChars > 0 && avgChars < 30) { focusArea = "Poor Feedback"; statusColor = C.purple; }
-    else if (writingMetrics.copyRate > 15) { focusArea = "High Copy/Paste"; statusColor = C.red; }
-
-    return { ...q, ...writingMetrics, avg, sd, deviation, focusArea, statusColor, avgChars, metNotePct, failRate, avgAHT };
-  }).filter(q => q.n > 0);
-
-  const alerts = [];
-  if (qaData.length > 0) {
-    const mostSevere = [...qaData].sort((a,b)=>a.deviation - b.deviation)[0];
-    if (mostSevere && mostSevere.deviation < -4) alerts.push({ qa: mostSevere.name, val: mostSevere.deviation, msg: `Scoring ${Math.abs(mostSevere.deviation)} pts below team average. Requires calibration.`, color: C.red, icon: "⛔", title: "Severity Alert" });
-    const mostVolatile = [...qaData].sort((a,b)=>b.sd - a.sd)[0];
-    if (mostVolatile && mostVolatile.sd > 7) alerts.push({ qa: mostVolatile.name, val: mostVolatile.sd, msg: `Highest standard deviation (${mostVolatile.sd}). Unstable scoring criteria.`, color: C.orange, icon: "⚠", title: "Volatility Alert" });
-    const mostCopied = [...qaData].sort((a,b)=>b.copyRate - a.copyRate)[0];
-    if (mostCopied && mostCopied.copyRate > 15) alerts.push({ qa: mostCopied.name, val: mostCopied.copyRate, msg: `${Math.round(mostCopied.copyRate)}% of comments are copy-pasted. Check feedback quality.`, color: C.red, icon: "📝", title: "Template Alert" });
-  }
-
-  const ScatterTooltip = ({ active, payload }) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return <div style={{background:C.panel,border:"1px solid "+C.border,borderRadius:8,padding:"10px 14px",fontSize:11,boxShadow:"0 4px 12px rgba(0,0,0,0.5)"}}>
-        <div style={{color:C.text, fontWeight:800, marginBottom:6, fontSize:12}}>{data.name}</div>
-        <div style={{color:C.cyan, marginBottom:2}}>Avg Score: <b style={{fontFamily:"monospace",fontSize:12}}>{data.avg}</b></div>
-        <div style={{color:data.sd>7?C.red:C.amber}}>Volatility: <b style={{fontFamily:"monospace",fontSize:12}}>{data.sd}</b></div>
-        <div style={{color:C.purple, marginBottom:2}}>Avg Feedback: <b style={{fontFamily:"monospace",fontSize:12}}>{data.avgChars} chars</b></div>
-      </div>;
-    }
-    return null;
-  };
-
-  let tableColumns = [];
-  if (view === "calibration") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avg","Avg Score",80],["deviation","Dev. from Avg",100],["sd","Volatility (SD)",100],["focusArea","Focus Area"]];
-  else if (view === "feedback") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgChars","Avg Comment Length",140],["metNotePct","Positive Reinforcement",150],["commentsCount","Total Notes",90],["focusArea","Focus Area"]];
-  else if (view === "ops") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgAHT","Avg Time (mins)",120],["failRate","Zero-Out Rate (<50)",140],["avg","Avg Score",80],["focusArea","Focus Area"]];
-  else if (view === "writing") tableColumns = [["name","QA Analyst"],["commentsCount","Comments",80],["alignScore","Alignment Score",120],["copyRate","Copy-Paste %",120],["avoidRate","Avoid Phrases %",140],["focusArea","Focus Area"]];
-
-  const btnStyle = (active) => ({fontSize:10, padding:"6px 14px", borderRadius:6, cursor:"pointer", fontWeight:600, border:"none", background: active ? C.cyan+"22" : "transparent", color: active ? C.cyan : C.dim, borderBottom: active ? "2px solid "+C.cyan : "2px solid transparent", transition: "all 0.2s"});
-
-  return <div>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      <KpiCard value={qaData.length} label={`Active Analysts (${WEEKS[wIdx]})`} color={C.purple} icon={"🕵️"}/>
-      <KpiCard value={weekInts.length} label="Total Evaluations" color={C.blue} icon={"📋"}/>
-      <KpiCard value={teamAvg||"--"} label="Weekly Team Average" color={C.cyan} icon={"⌀"}/>
-    </div>
-
-    {alerts.length > 0 && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))",gap:12,marginBottom:16}}>
-      {alerts.map((al, i) => <div key={i} style={{...cs, borderLeft: "3px solid " + al.color, display: "flex", gap: 12, alignItems: "center"}}><div style={{fontSize: 24}}>{al.icon}</div><div><div style={{fontSize: 10, fontWeight: 700, color: al.color, textTransform: "uppercase", letterSpacing: 0.5}}>{al.title}</div><div style={{fontSize: 13, fontWeight: 700, color: C.text, marginTop: 2}}>{al.qa}</div><div style={{fontSize: 10, color: C.dim, marginTop: 2}}>{al.msg}</div></div></div>)}
-    </div>}
-
-    <div style={{...cs,marginBottom:16}}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4}}><div style={{fontSize:12,fontWeight:700,color:C.text}}>Calibration Quadrant</div><div style={{fontSize:10, color:C.dim}}>X: Average Score | Y: Volatility (Std Dev)</div></div>
-      {qaData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={260}>
-          <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: -20 }}>
-            <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/>
-            <XAxis type="number" dataKey="avg" name="Avg Score" domain={['dataMin - 2', 'dataMax + 2']} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} />
-            <YAxis type="number" dataKey="sd" name="Volatility" domain={[0, 'auto']} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} />
-            <ZAxis type="number" dataKey="n" range={[60, 400]} name="Evaluations" />
-            <Tooltip cursor={{strokeDasharray: '3 3'}} content={<ScatterTooltip/>} />
-            <ReferenceLine x={teamAvg} stroke={C.cyan+"66"} strokeDasharray="4 4" label={{value:`Team Avg (${teamAvg})`, position:"top", fill:C.cyan, fontSize:10}} />
-            <ReferenceLine y={5} stroke={C.amber+"66"} strokeDasharray="4 4" label={{value:"Volatility Threshold", position:"insideRight", fill:C.amber, fontSize:10}} />
-            <Scatter name="Analysts" data={qaData}>{qaData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.statusColor} opacity={0.8} />)}</Scatter>
-          </ScatterChart>
-        </ResponsiveContainer>
-      ) : <EmptyState message={`No QA evaluations found for ${WEEKS[wIdx]}.`} />}
-    </div>
-
-    <div style={{...cs, overflowX: "auto"}}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12}}>
-        <div style={{fontSize:12,fontWeight:700,color:C.text}}>Analyst Performance Lenses <span style={{fontSize:10, fontWeight:400, color:C.dim}}>(Weekly: {WEEKS[wIdx]})</span></div>
-        <div style={{display:"flex", background:C.bg, borderRadius:8, padding:2, border:"1px solid "+C.border}}>
-          <button onClick={() => setView("calibration")} style={btnStyle(view === "calibration")}>🎯 Calibration</button>
-          <button onClick={() => setView("feedback")} style={btnStyle(view === "feedback")}>✍️ Coaching</button>
-          <button onClick={() => setView("ops")} style={btnStyle(view === "ops")}>⏱️ Operations</button>
-          <button onClick={() => setView("writing")} style={btnStyle(view === "writing")}>📝 Writing Guide</button>
-        </div>
-      </div>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "500px"}}>
-        <SortHeader columns={tableColumns} sortKey={qaSort.sk} sortDir={qaSort.sd} onSort={qaSort.toggle}/>
-        <tbody>{[...qaData].sort((a,b)=>qaSort.sortFn(a[qaSort.sk],b[qaSort.sk])).map((q,i)=>
-          <tr key={i} onClick={() => onSelectQA(q.name)} style={{borderBottom:"1px solid "+C.border+"22", transition:"background 0.15s", cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-            <td style={{padding:"10px",fontWeight:600, color:C.text}}>{q.name}</td>
-            {view !== "writing" && <td style={{padding:"10px",fontFamily:"monospace"}}>{q.n}</td>}
-            {view === "calibration" && <>
-              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:q.avg>=GOAL?C.green:C.amber}}>{q.avg}</td>
-              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600}}><span style={{color: q.deviation > 0 ? C.cyan : q.deviation < 0 ? C.red : C.dim}}>{q.deviation > 0 ? "▲ +" : q.deviation < 0 ? "▼ " : ""}{q.deviation !== 0 ? q.deviation : "--"} pts</span></td>
-              <td style={{padding:"10px",fontFamily:"monospace",color:q.sd>7?C.orange:C.dim}}>{q.sd}</td>
-            </>}
-            {view === "feedback" && <>
-              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600, color: q.avgChars < 30 ? C.red : C.cyan}}>{q.avgChars} chars/eval</td>
-              <td style={{padding:"10px",fontFamily:"monospace"}}><div style={{display:"flex", alignItems:"center", gap:6}}><div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:q.metNotePct+"%", height:"100%", background:C.purple, borderRadius:2}}></div></div><span>{q.metNotePct}%</span></div></td>
-              <td style={{padding:"10px",fontFamily:"monospace", color:C.dim}}>{q.commentsCount} notes</td>
-            </>}
-            {view === "ops" && <>
-              <td style={{padding:"10px",fontFamily:"monospace", color:C.text}}>{q.avgAHT > 0 ? `${q.avgAHT} mins` : "--"}</td>
-              <td style={{padding:"10px",fontFamily:"monospace", color: q.failRate > 10 ? C.red : C.dim}}>{q.failRate}% fatals</td>
-              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:C.cyan}}>{q.avg}</td>
-            </>}
-            {view === "writing" && <>
-              <td style={{padding:"10px",fontFamily:"monospace",color:C.dim}}>{q.commentsCount}</td>
-              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:q.alignScore>=70?C.green:q.alignScore>=50?C.amber:C.red}}>{q.alignScore}</td>
-              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600,color:q.copyRate>15?C.red:C.text}}>{Math.round(q.copyRate)}%</td>
-              <td style={{padding:"10px",fontFamily:"monospace",color:q.avoidRate>15?C.red:C.text}}>{Math.round(q.avoidRate)}%</td>
-            </>}
-            <td style={{padding:"10px"}}><span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background: q.statusColor+"15", color: q.statusColor, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, border:"1px solid "+q.statusColor+"33"}}>{q.focusArea}</span></td>
-          </tr>)}
-        </tbody>
-      </table>
-    </div>
-  </div>;
-}
-
-function IntelligenceTab({csatData,surveyData,onSelectAgent,tls}){
-  const[csatFilter,setCsatFilter]=useState("all");
-  const intelSort=useSort("avgRating","asc");
-  const agents=Object.values(surveyData?.agents||{}).filter(a=>a.ratings.length>0);
-  const filteredAgents=csatFilter==="all"?agents: csatFilter==="low"?agents.filter(a=>a.avgRating<3): csatFilter==="high"?agents.filter(a=>a.avgRating>=4):agents;
-  return <div>
-    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
-      <KpiCard value={csatData.matched} label="Matched Interactions" color={C.teal} icon={"🔗"}/>
-      <KpiCard value={csatData.pearson!=null?csatData.pearson:"--"} label="QA-CSAT Correlation" color={csatData.pearson>0.3?C.green:C.amber} icon={"📊"}/>
-      <KpiCard value={surveyData?.total||0} label="Total Surveys" color={C.purple} icon={"📩"}/>
-      <KpiCard value={surveyData?.avgRating||"--"} label="Avg Rating" color={C.purple} icon={"★"}/>
-      <KpiCard value={(surveyData?.responseRate||0)+"%"} label="Response Rate" color={C.teal}/>
-    </div>
-    {csatData.categoryImpact.length>0&&<div style={{...cs,marginBottom:12}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>QA Impact on CSAT — Which behaviors drive customer satisfaction?</div>
-      {csatData.categoryImpact.map((c,i)=>{
-        const w=Math.max(5,Math.abs(c.correlation)*100); const clr=c.correlation>0.3?C.green:c.correlation>0.1?C.teal:C.dim;
-        return <div key={i} style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}><span style={{fontSize:10,color:C.dim,width:100,textAlign:"right"}}>{c.name}</span><div style={{flex:1,height:8,background:C.bg,borderRadius:4,overflow:"hidden"}}><div style={{width:w+"%",height:"100%",borderRadius:4,background:clr,transition:"width .3s"}}></div></div><span style={{fontSize:11,fontWeight:700,fontFamily:"monospace",color:clr,width:40}}>{c.correlation}</span><span style={{fontSize:9,color:C.dim}}>n={c.n}</span></div>;})}
-    </div>}
-    {csatData.findings.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.purple}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.purple,marginBottom:8}}>{"📊"} QA-CSAT Insights</div>
-      {csatData.findings.slice(0,8).map((f,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<Math.min(csatData.findings.length,8)-1?"1px solid "+C.border+"22":undefined, display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><span style={{fontSize:11,fontWeight:600,cursor:f.agent!=="Campaign"?"pointer":"default"}} onClick={()=>{if(f.agent!=="Campaign"){const t=tls.find(t=>t.agents.some(a=>a.n===f.agent));const a=t?.agents.find(x=>x.n===f.agent);if(a&&t)onSelectAgent(a,t);}}}>{f.agent}</span></div><span style={{fontSize:10,color:f.severity==="critical"?C.red:f.severity==="warning"?C.amber:C.teal}}>{f.msg}</span></div>)}
-    </div>}
-    <div style={{display:"flex",gap:8,marginBottom:12}}>
-      {[["all","All"],["low","CSAT ≤ 3"],["high","CSAT ≥ 4"]].map(([val,label])=><button key={val} onClick={()=>setCsatFilter(val)} style={{fontSize:10,padding:"4px 12px",borderRadius:4,cursor:"pointer",border:"1px solid "+(csatFilter===val?C.purple:C.border), background:csatFilter===val?C.purple+"15":"transparent",color:csatFilter===val?C.purple:C.dim}}>{label}</button>)}
-    </div>
-    <div style={{...cs, overflowX: "auto"}}>
-      <div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Agent Survey Performance</div>
-      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "600px"}}>
-        <SortHeader columns={[["name","Agent"],["surveys","Surveys",60],["avgRating","Avg Rating",70],["qaScore","QA Score",70],["alignment","Status",80],["comment","Comment"],["actions","",50]]} sortKey={intelSort.sk} sortDir={intelSort.sd} onSort={intelSort.toggle}/>
-        <tbody>{filteredAgents.map(a=>{const qm=csatData.agentMap[a.name];return{...a,qaScore:qm?.qaScore||0,alignment:qm?.alignment||"neutral",comment:a.comments.length?a.comments[a.comments.length-1]:""}; }).sort((a,b)=>intelSort.sortFn(a[intelSort.sk],b[intelSort.sk])).map((a,i)=>{
-          return <tr key={i} style={{borderBottom:"1px solid "+C.border+"22"}}>
-            <td style={{padding:"8px 10px",fontWeight:600}}>{a.name}</td><td style={{padding:"8px 10px",fontFamily:"monospace"}}>{a.surveys}</td><td style={{padding:"8px 10px"}}><span style={{fontWeight:700,fontFamily:"monospace",color:(a.avgRating||0)>=4?C.green:(a.avgRating||0)>=3?C.amber:C.red}}>{a.avgRating||"--"}</span> {"★"}</td><td style={{padding:"8px 10px",fontFamily:"monospace",color:C.dim}}>{a.qaScore||"--"}</td><td style={{padding:"8px 10px"}}>{(()=>{const colors={aligned:C.green,csat_leads:C.amber,qa_leads:C.amber,both_low:C.red,neutral:C.dim}; const labels={aligned:"Aligned",csat_leads:"CSAT Leads",qa_leads:"QA Leads",both_low:"Low",neutral:"—"}; return <span style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:(colors[a.alignment]||C.dim)+"18",color:colors[a.alignment]||C.dim}}>{labels[a.alignment]||"—"}</span>;})()}</td><td style={{padding:"8px 10px",fontSize:10,color:C.dim,maxWidth:180,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.comments.length?a.comments[a.comments.length-1].substring(0,60):"--"}</td><td style={{padding:"8px 10px"}}>{a.entries?.[0]?.url&&<a href={a.entries[a.entries.length-1].url} target="_blank" rel="noopener noreferrer" style={{fontSize:9,color:C.purple,textDecoration:"none"}}>{"↗"} Gladly</a>}</td>
-          </tr>;})}</tbody>
-      </table>
-    </div>
-  </div>;
-}
-
-function LoadingScreen({error,onSetup}){
-  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif", display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-    <div style={{textAlign:"center"}}>
-      <div style={{marginBottom:20}}><svg width="48" height="48" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg></div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-0.5px",marginBottom:16}}>Next<span style={{color:"#06b6d4"}}>Skill</span></div>
-      {error?<><p style={{fontSize:12,color:C.red,margin:"0 0 16px",maxWidth:400}}>{error}</p><button onClick={onSetup} style={{padding:"8px 20px",borderRadius:6,border:"1px solid "+C.cyan,background:"transparent",color:C.cyan,fontSize:11,cursor:"pointer"}}>Configure</button></>:<div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}><div style={{width:6,height:6,borderRadius:"50%",background:C.cyan,animation:"pulse 1.5s infinite"}}></div><span style={{fontSize:11,color:C.dim,fontFamily:"monospace"}}>Initializing platform...</span></div>}
-    </div>
-    <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
-  </div>;
-}
-
-function SetupScreen({onDataReady,savedConfig}){
-  const[qaId,setQaId]=useState(savedConfig?.qaId||""); const[rosterId,setRosterId]=useState(savedConfig?.rosterId||""); const[surveyId,setSurveyId]=useState(savedConfig?.surveyId||""); const[loading,setLoading]=useState(false); const[error,setError]=useState(null); const autoFetched=React.useRef(false);
-  React.useEffect(()=>{if(savedConfig?.qaId&&savedConfig?.rosterId&&!autoFetched.current){autoFetched.current=true;handleConnect(savedConfig.qaId,savedConfig.rosterId,savedConfig.surveyId);}},[]);
-  const extractId=(input)=>{if(!input)return"";const s=input.trim();const m=s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);return m?m[1]:s;};
-  const handleConnect=async(qId,rId,sId)=>{
-    const q=extractId(qId||qaId),r=extractId(rId||rosterId),s=extractId(sId||surveyId);
-    if(!q||!r){setError("QA and Roster Sheet IDs required.");return;}
-    setLoading(true);setError(null);
-    try{const result=await fetchFromSheets(q,r,s); if(result.error){setError(result.error);setLoading(false);return;} window.location.hash="qa="+q+"&roster="+r+"&survey="+s; onDataReady(result,{qaId:q,rosterId:r,surveyId:s});}catch(err){setError(err.message);setLoading(false);}
-  };
-  const inp={width:"100%",padding:"10px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,fontSize:12,fontFamily:"monospace",outline:"none",boxSizing:"border-box"};
-  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40}}>
-    <div style={{maxWidth:500,width:"100%"}}>
-      <div style={{textAlign:"center",marginBottom:32}}>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><svg width="40" height="40" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg><span style={{fontSize:22,fontWeight:800,letterSpacing:"-0.5px"}}>Next<span style={{color:"#06b6d4"}}>Skill</span></span></div>
-        <p style={{fontSize:11,color:C.dim,margin:0}}>Configure your data sources</p>
-      </div>
-      <div style={{marginBottom:12}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>QA REVIEWS SHEET *</label><input value={qaId} onChange={e=>setQaId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
-      <div style={{marginBottom:12}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>ROSTER SHEET *</label><input value={rosterId} onChange={e=>setRosterId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
-      <div style={{marginBottom:20}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>SURVEY SHEET (optional)</label><input value={surveyId} onChange={e=>setSurveyId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
-      {error&&<div style={{background:C.red+"12",border:"1px solid "+C.red+"30",borderRadius:8,padding:"10px 14px",marginBottom:16}}><span style={{fontSize:11,color:C.red}}>{error}</span></div>}
-      <button onClick={()=>handleConnect()} disabled={!qaId||!rosterId||loading} style={{width:"100%",padding:"14px 0",borderRadius:8,border:"none", background:qaId&&rosterId&&!loading?"linear-gradient(135deg,"+C.cyan+","+C.blue+")":C.muted, color:qaId&&rosterId?C.text:C.text+"66",fontSize:13,fontWeight:700,cursor:qaId&&rosterId&&!loading?"pointer":"not-allowed", letterSpacing:"1px",textTransform:"uppercase"}}>{loading?"Connecting...":"Connect & Launch"}</button>
-    </div>
-  </div>;
+  );
 }
 
 // ─────────────────────────────────────────────
-// N U E V O: COMPONENTE AGENT PROFILE PANEL (BÁSICO)
+// COMPONENTE: AGENT PROFILE PANEL (ORIGINAL RECUPERADO)
 // ─────────────────────────────────────────────
 function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekISO,onClose,onViewInteraction,isMobile}){
   if(!agent)return null;
@@ -2072,7 +583,7 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
             {Object.keys(int.comments||{}).length>0&&Object.entries(int.comments).slice(0,2).map(([q,c],ci)=>
               <div key={ci} style={{padding:"8px 12px",borderRadius:6,background:C.bg,borderLeft:"3px solid "+C.cyan+"44",marginBottom:4}}>
                 <div style={{fontSize:8,color:C.cyan,fontWeight:600,marginBottom:2}}>{q}</div>
-                <div style={{fontSize:10,color:C.text,fontStyle:"italic",lineHeight:1.5,opacity:.85}}>{"“"}{c.substring(0,150)}{c.length>150?"...":""}{"”"}</div>
+                <div style={{fontSize:10,color:C.text,fontStyle:"italic",lineHeight:1.5,opacity:.85}}>{c.substring(0,150)}{c.length>150?"...":""}</div>
               </div>)}
           </div>;})}
         </div>:<EmptyState message="No evaluations found for this agent"/>}
@@ -2080,6 +591,515 @@ function AgentProfilePanel({agent,tl,wIdx,interactions,surveyData,csatData,weekI
     </div>
   </div>;
 }
+
+function LeadershipTab({ tls, wIdx, onSelectLeader }) {
+  const leadSort = useSort("avg");
+  
+  const tlStats = tls.map(tl => {
+    const scored = tl.agents.filter(a => a.w[wIdx] != null);
+    const avg = scored.length ? +(scored.reduce((s, a) => s + a.w[wIdx], 0) / scored.length).toFixed(1) : 0;
+    const trend = wowDelta(tl.agents, wIdx);
+    const atGoal = scored.filter(a => a.w[wIdx] >= GOAL).length;
+    const pctGoal = scored.length ? Math.round((atGoal / scored.length) * 100) : 0;
+    const criticals = tl.agents.filter(a => classify(a, wIdx).cat === "Critical").length;
+    return { ...tl, avg, trend, pctGoal, criticals, scoredCount: scored.length };
+  }).filter(t => t.scoredCount > 0);
+
+  const bestTL = [...tlStats].sort((a,b) => b.avg - a.avg)[0];
+  const mostImprovedTL = [...tlStats].filter(t => t.trend != null).sort((a,b) => b.trend - a.trend)[0];
+
+  const barData = [...tlStats].sort((a,b) => b.avg - a.avg).map(t => ({ name: t.name.split(" ")[0], fullName: t.name, avg: t.avg, fill: t.avg >= GOAL ? C.green : t.avg >= 60 ? C.amber : C.red }));
+
+  return <div>
+    <HistoricalBanner wIdx={wIdx}/>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={tlStats.length} label="Active Leaders" color={C.orange} icon={"👥"}/>
+      <KpiCard value={bestTL ? bestTL.avg : "--"} label="Top Performing TL" sub={bestTL ? bestTL.name : ""} color={C.green} icon={"🏆"}/>
+      <KpiCard value={mostImprovedTL && mostImprovedTL.trend > 0 ? "+"+mostImprovedTL.trend : "--"} label="Most Improved TL" sub={mostImprovedTL ? mostImprovedTL.name : ""} color={C.cyan} icon={"🚀"}/>
+    </div>
+
+    <div style={{...cs, marginBottom:16}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:16}}>Leadership Performance Ranking</div>
+      <ResponsiveContainer width="100%" height={220}>
+        <BarChart data={barData} margin={{ top: 20, right: 0, left: -20, bottom: 0 }}>
+          <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3" vertical={false}/>
+          <XAxis dataKey="name" tick={{fontSize:10,fill:C.dim}} axisLine={false} tickLine={false}/>
+          <YAxis domain={[0,100]} tick={{fontSize:10,fill:C.dim}} axisLine={false} tickLine={false}/>
+          <Tooltip cursor={{fill:C.border+"33"}} contentStyle={{background:C.panel, border:"1px solid "+C.border, fontSize:11, borderRadius:8}}/>
+          <ReferenceLine y={GOAL} stroke={C.green+"66"} strokeDasharray="4 4" label={{value:`Goal ${GOAL}`, position:"insideTopLeft", fill:C.green, fontSize:10}} />
+          <Bar dataKey="avg" radius={[4,4,0,0]} name="Team Avg">
+            {barData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+
+    <div style={{...cs, overflowX: "auto"}}>
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Team Leader Matrix</div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "600px"}}>
+        <SortHeader columns={[["name","Team Leader"],["site","Site",80],["scoredCount","Agents",80],["avg","Team Avg",100],["trend","WoW Trend",100],["pctGoal","% At Goal",100],["criticals","Criticals",100]]} sortKey={leadSort.sk} sortDir={leadSort.sd} onSort={leadSort.toggle}/>
+        <tbody>{tlStats.sort((a,b)=>leadSort.sortFn(a[leadSort.sk],b[leadSort.sk])).map((t,i) => (
+          <tr key={i} onClick={() => onSelectLeader(t)} style={{borderBottom:"1px solid "+C.border+"22", cursor:"pointer", transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=C.orange+"0a"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <td style={{padding:"10px 12px",fontWeight:600, color:C.text}}>{t.name}</td>
+            <td style={{padding:"10px 12px", color:C.dim}}>{t.site}</td>
+            <td style={{padding:"10px 12px", fontFamily:"monospace", color:C.dim}}>{t.scoredCount}</td>
+            <td style={{padding:"10px 12px", fontWeight:800, fontFamily:"monospace", color: t.avg >= GOAL ? C.green : t.avg >= 60 ? C.amber : C.red}}>{t.avg}</td>
+            <td style={{padding:"10px 12px"}}>{t.trend != null && <WoWBadge delta={t.trend}/>}</td>
+            <td style={{padding:"10px 12px", fontFamily:"monospace"}}>
+              <div style={{display:"flex", alignItems:"center", gap:6}}>
+                <div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:t.pctGoal+"%", height:"100%", background:C.cyan, borderRadius:2}}></div></div>
+                <span>{t.pctGoal}%</span>
+              </div>
+            </td>
+            <td style={{padding:"10px 12px", fontFamily:"monospace", color: t.criticals > 2 ? C.red : C.dim}}>{t.criticals} {t.criticals > 2 && "⚠"}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csatFindings,site,filteredTLs, isMobile}){
+  const tlSort=useSort("avg");
+  const allAgents=filteredTLs.flatMap(t=>t.agents);
+  const scored=allAgents.filter(a=>a.w[wIdx]!=null);
+  const avg=scored.length?(scored.reduce((s,a)=>s+a.w[wIdx],0)/scored.length).toFixed(1):"--";
+  const atGoal=scored.filter(a=>a.w[wIdx]>=GOAL).length;
+  const pct72=scored.length?Math.round(atGoal/scored.length*100):0;
+  const wow=wowDelta(allAgents,wIdx);
+  const critical=allAgents.filter(a=>classify(a,wIdx).cat==="Critical");
+  const catCounts={};
+  allAgents.forEach(a=>{const c=classify(a,wIdx);catCounts[c.cat]=(catCounts[c.cat]||0)+1;});
+  const catData=Object.entries(catCounts).map(([cat,count])=>{
+    const colors={Stable:"#4ade80",Monitor:"#facc15",Convertible:"#38bdf8",Stagnant:"#fb923c",Regressing:"#f87171",Critical:"#ef4444","No Data":"#555"};
+    return{cat,count,color:colors[cat]||"#555"};});
+  const trendData=WEEKS.map((wk,i)=>{const s=allAgents.filter(a=>a.w[i]!=null);
+    return{wk,avg:s.length?+(s.reduce((sum,a)=>sum+a.w[i],0)/s.length).toFixed(1):null};});
+
+  const initials=(name)=>{const p=name.split(" ");return(p[0]?.[0]||"")+(p[p.length-1]?.[0]||"");};
+  const siteColors={HMO:"#3b82f6",JAM:"#a78bfa",PAN:"#f59e0b"};
+  const mostImproved = getMostImprovedAgents(allAgents, wIdx);
+
+  return <div>
+    <HistoricalBanner wIdx={wIdx}/>
+    <div style={{display:"flex", flexDirection: isMobile ? "column" : "row", gap:16, marginBottom:16}}>
+      <div style={{width: isMobile ? "100%" : "380px", flexShrink: 0, display:"flex",flexDirection:"column",gap:12}}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div style={{fontSize:10,color:"#6ee7b7",fontWeight:500}}>QA Score</div>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M4 14l4-4 3 3 5-7" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+            <div style={{fontSize:32,fontWeight:800,color:"#34d399",fontFamily:"'Geist Mono',monospace",letterSpacing:"-2px",lineHeight:1,marginTop:6}}>{avg}</div>
+            <div style={{marginTop:4}}>{wow!=null&&<WoWBadge delta={wow}/>}</div>
+            <div style={{fontSize:9,color:"#6ee7b7",marginTop:4,opacity:.7}}>Goal {"≥"} score of {GOAL}</div>
+          </div>
+          <div style={{background:C.card,borderRadius:12,border:"1px solid "+C.border,padding:16,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <div>
+              <div style={{fontSize:10,color:C.dim,fontWeight:500}}>{"≥"} {GOAL}</div>
+              <div style={{fontSize:28,fontWeight:800,color:C.text,fontFamily:"'Geist Mono',monospace",letterSpacing:"-1px",lineHeight:1,marginTop:6}}>{pct72}%</div>
+            </div>
+            <div style={{position:"relative"}}>
+              <DonutChart value={atGoal} total={scored.length} color={C.green} size={52}/>
+              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:10,fontWeight:700,fontFamily:"monospace",color:C.green}}>{pct72}%</span></div>
+            </div>
+          </div>
+        </div>
+        <div onClick={()=>setCatFilter(catFilter==="Critical"?null:"Critical")} style={{background:"#2a0f0f",borderRadius:12,border:"1px solid #4a1c1c",padding:16,cursor:"pointer",transition:"all .15s"}} onMouseEnter={e=>e.currentTarget.style.background="#331414"} onMouseLeave={e=>e.currentTarget.style.background="#2a0f0f"}>
+          <div style={{fontSize:10,color:"#fca5a5",fontWeight:500,marginBottom:4}}>Critical Agents</div>
+          <div style={{fontSize:28,fontWeight:800,color:"#f87171",fontFamily:"'Geist Mono',monospace",letterSpacing:"-1px",lineHeight:1}}>{critical.length}</div>
+          <div style={{fontSize:10,color:"#fca5a5",marginTop:6,opacity:.8,lineHeight:1.3}}>{critical.slice(0,3).map(a=>a.n).join(", ")}{critical.length>3?" +"+String(critical.length-3)+" more":""}</div>
+        </div>
+        {mostImproved.length > 0 && (
+          <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
+            <div style={{fontSize:10,color:"#6ee7b7",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>🔥 Most Improved Agents</div>
+            {mostImproved.map((mi, i) => (
+               <div key={i} onClick={() => { const t = filteredTLs.find(tl => tl.agents.some(x => x.n === mi.n)); if(t) onSelectAgent(mi.a, t); }} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",cursor:"pointer",borderBottom:i<mostImproved.length-1?"1px solid #1a4a32":"none"} onMouseEnter={e=>e.currentTarget.style.opacity=0.8} onMouseLeave={e=>e.currentTarget.style.opacity=1}}>
+                 <span style={{fontSize:11,color:C.text,fontWeight:600}}>{mi.n}</span>
+                 <span style={{fontSize:10,color:C.green,fontWeight:700}}>+{mi.imp} <span style={{color:C.green,opacity:0.6}}>({mi.cur})</span></span>
+               </div>
+            ))}
+          </div>
+        )}
+        {csatFindings&&csatFindings.length>0&&<div style={{...cs,flex:1}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>CSAT-QA Insights</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {csatFindings.slice(0,5).map((f,i)=>{
+              const sev=f.severity; const clr=sev==="critical"?C.red:sev==="warning"?C.amber:C.teal; const ic=sev==="critical"?"⛔":sev==="warning"?"⚠":"ℹ";
+              return <div key={i} style={{padding:"10px 12px",borderRadius:8,background:clr+"06",border:"1px solid "+clr+"18", borderLeft:"3px solid "+clr,display:"flex",gap:10,alignItems:"flex-start",transition:"background .15s"} onMouseEnter={e=>{e.currentTarget.style.background=clr+"10";}} onMouseLeave={e=>{e.currentTarget.style.background=clr+"06";}}>
+                <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{ic}</span>
+                <div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:700,color:C.text}}>{f.agent}</div><div style={{fontSize:10,color:clr,lineHeight:1.4,marginTop:2}}>{f.msg}</div></div>
+              </div>;})}
+          </div>
+        </div>}
+      </div>
+      <div style={{flex: 1, display:"flex",flexDirection:"column",gap:12, minWidth: 0}}>
+        <div style={{...cs}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Weekly Score Trend</div>
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={trendData}>
+              <defs><linearGradient id="campG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={C.cyan} stopOpacity={0.12}/><stop offset="100%" stopColor={C.cyan} stopOpacity={0.01}/></linearGradient></defs>
+              <CartesianGrid stroke={C.border+"40"} strokeDasharray="3 3"/>
+              <XAxis dataKey="wk" tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false}/>
+              <YAxis domain={[0,100]} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} width={32}/>
+              <Tooltip content={<Tp/>}/>
+              <ReferenceLine y={GOAL} stroke={C.green+"55"} strokeDasharray="6 3" label={{value:"Goal "+GOAL,position:"right",fill:C.dim,fontSize:10}}/>
+              <Area type="monotone" dataKey="avg" name="Avg Score" stroke={C.cyan} fill="url(#campG)" strokeWidth={2.5} dot={{r:4,fill:C.cyan,stroke:C.bg,strokeWidth:2}} activeDot={{r:6,fill:C.cyan,stroke:"#fff",strokeWidth:2}}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",gap:12}}>
+          <div style={{...cs}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Agent Categories</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+              {catData.sort((a,b)=>b.count-a.count).slice(0,6).map(d=><div key={d.cat} onClick={()=>setCatFilter(catFilter===d.cat?null:d.cat)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"10px 4px",borderRadius:8,cursor:"pointer", background:catFilter===d.cat?d.color+"12":"transparent",border:catFilter===d.cat?"1px solid "+d.color+"33":"1px solid transparent",transition:"all .15s"} onMouseEnter={e=>{if(catFilter!==d.cat)e.currentTarget.style.background=d.color+"08";}} onMouseLeave={e=>{if(catFilter!==d.cat)e.currentTarget.style.background="transparent";}}>
+                <div style={{position:"relative"}}><DonutChart value={d.count} total={scored.length} color={d.color} size={56}/><div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:d.color}}>{d.count}</span></div></div>
+                <span style={{fontSize:9,color:catFilter===d.cat?d.color:C.dim,fontWeight:500,textAlign:"center"}}>{d.cat}</span>
+              </div>)}
+            </div>
+            {catFilter&&<div style={{textAlign:"center",marginTop:8}}><button onClick={()=>setCatFilter(null)} style={{fontSize:9,color:C.cyan,background:C.cyan+"10",border:"1px solid "+C.cyan+"33",borderRadius:12,padding:"4px 14px",cursor:"pointer"}}>Clear filter</button></div>}
+          </div>
+          <div style={{...cs,overflowX:"auto"}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Team Lead Rankings</div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead><tr style={{borderBottom:"1px solid "+C.border}}>
+                {["Team Lead","","Avg","Trend",""].map((h,hi)=><th key={hi} style={{textAlign:"left",padding:"6px 8px",color:C.dim,fontWeight:600,fontSize:9}}>{h}</th>)}
+              </tr></thead>
+              <tbody>{filteredTLs.map((t,i)=>{
+                const ta=t.agents.filter(a=>a.w[wIdx]!=null);
+                const tavg=ta.length?+(ta.reduce((s,a)=>s+a.w[wIdx],0)/ta.length).toFixed(1):0;
+                const tw=wowDelta(t.agents,wIdx); const sc=siteColors[t.site]||C.muted;
+                const rangeLbl=tavg>=GOAL?"72+":tavg>=60?"60-71":tavg<60?("< 60"):"--";
+                const rangeClr=tavg>=GOAL?C.green:tavg>=60?C.amber:C.red; const rangeBg=tavg>=GOAL?"#0c2d1e":tavg>=60?"#2d2206":"#2a0f0f";
+                return <tr key={i} style={{borderBottom:"1px solid "+C.border+"44",cursor:"pointer",transition:"background .1s"} onMouseEnter={e=>{e.currentTarget.style.background=C.cyan+"06";const b=e.currentTarget.lastElementChild?.firstElementChild;if(b)b.style.opacity="1";}} onMouseLeave={e=>{e.currentTarget.style.background="transparent";const b=e.currentTarget.lastElementChild?.firstElementChild;if(b)b.style.opacity="0.4";}} onClick={()=>onSelectTL(t)}>
+                  <td style={{padding:"10px 8px"}}><div style={{fontWeight:600,fontSize:11}}>{t.name}</div></td>
+                  <td style={{padding:"10px 4px"}}><div style={{width:26,height:26,borderRadius:"50%",background:sc+"22",border:"1px solid "+sc+"44", display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,color:sc}}>{initials(t.name)}</div></td>
+                  <td style={{padding:"10px 8px"}}><span style={{fontWeight:700,fontFamily:"monospace",fontSize:11,padding:"3px 10px",borderRadius:5, background:rangeBg,color:rangeClr,border:"1px solid "+rangeClr+"22"}}>{rangeLbl}</span></td>
+                  <td style={{padding:"10px 8px"}}>{tw!=null&&<WoWBadge delta={tw}/>}</td>
+                  <td style={{padding:"10px 8px"}..}><button onClick={e=>{e.stopPropagation();onSelectTL(t);}} style={{fontSize:9,padding:"4px 10px",borderRadius:12,border:"1px solid "+C.cyan+"44", background:C.cyan+"08",color:C.cyan,cursor:"pointer",fontWeight:600,opacity:.4,transition:"opacity .15s"}}>View Agents</button></td>
+                </tr>;})}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+    {catFilter&&<div style={{...cs,marginBottom:16, overflowX: "auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.text}}>{catFilter} Agents</div>
+        <button onClick={()=>setCatFilter(null)} style={{fontSize:10,color:C.cyan,background:"none",border:"1px solid "+C.cyan+"44",borderRadius:12,padding:"4px 14px",cursor:"pointer"}}>Show All</button>
+      </div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "500px"}}>
+        <SortHeader columns={[["name","Agent"],["tl","Team Lead"],["site","Site",50],["score","Score",60],["trend","Trend",60],["risk","Risk",60]]} sortKey={tlSort.sk} sortDir={tlSort.sd} onSort={tlSort.toggle}/>
+        <tbody>{filteredTLs.flatMap(t=>t.agents.filter(a=>classify(a,wIdx).cat===catFilter).map(a=>({a,t,name:a.n,tl:t.name,site:t.site,score:a.w[wIdx]||0,trend:getAgentTrend(a,wIdx)||0,risk:getRiskLevel(a,wIdx).level}))).sort((x,y)=>tlSort.sortFn(x[tlSort.sk],y[tlSort.sk])).map(({a,t},i)=>{
+          const cat=classify(a,wIdx),tr=getAgentTrend(a,wIdx),risk=getRiskLevel(a,wIdx);
+          return <tr key={i} onClick={()=>onSelectAgent(a,t)} style={{cursor:"pointer",borderBottom:"1px solid "+C.border+"33"} onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"06"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <td style={{padding:"8px",fontWeight:600}}>{a.n}</td><td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.name}</td><td style={{padding:"8px",fontSize:10,color:C.dim}}>{t.site}</td><td style={{padding:"8px",fontWeight:700,fontFamily:"monospace",color:cat.color}}>{a.w[wIdx]||"--"}</td><td style={{padding:"8px"}}>{tr!=null&&<WoWBadge delta={tr}/>}</td><td style={{padding:"8px"}}><RiskBadge level={risk.level}/></td>
+          </tr>;})}</tbody>
+      </table>
+    </div>}
+  </div>;
+}
+
+function TLView({tl,wIdx,onSelectAgent, isMobile}){
+  const agSort=useSort("score");
+  if(!tl)return null;
+  const scored=tl.agents.filter(a=>a.w[wIdx]!=null);
+  if(!scored.length)return <EmptyState message={"No evaluations for "+tl.name+" in week "+WEEKS[wIdx]}/>;
+
+  const avg=(scored.reduce((s,a)=>s+a.w[wIdx],0)/scored.length).toFixed(1);
+  const wow=wowDelta(tl.agents,wIdx);
+  const criticalAgents = tl.agents.filter(a=>classify(a,wIdx).cat==="Critical" || classify(a,wIdx).cat==="Stagnant");
+  const convertibleAgents = tl.agents.filter(a=>classify(a,wIdx).cat==="Convertible").sort((a,b)=>(b.w[wIdx]||0)-(a.w[wIdx]||0));
+  const fastestPath = convertibleAgents[0];
+
+  const scAvgs = SCS.map(c => {
+    const vals = tl.agents.map(a=>a.sc[c]).filter(v=>v!=null);
+    return { code: c, val: vals.length ? vals.reduce((s,v)=>s+v,0)/vals.length : 0 };
+  }).sort((a,b)=>a.val-b.val).slice(0,2);
+
+  const aiText = `Team average ${wow >= 0 ? 'went up by '+wow : 'dropped by '+Math.abs(wow)} pts. Priority focus on ${criticalAgents.length} agents with critical scores${scAvgs[0] ? ` in '${SC_FULL[scAvgs[0].code]}'` : ''}. Tactical coaching recommended ASAP.`;
+
+  return <div>
+    <HistoricalBanner wIdx={wIdx}/>
+    <div style={{background:"linear-gradient(90deg, #111827, #0d131f)", border:"1px solid "+C.cyan+"33", borderRadius:12, padding:16, marginBottom:20, display:"flex", gap:16, boxShadow:"0 4px 20px "+C.cyan+"0a"}}>
+       <div style={{background:C.cyan+"22", padding:"8px 10px", borderRadius:8, fontSize:20, height:"fit-content", border:"1px solid "+C.cyan+"44"}}>✨</div>
+       <div>
+          <div style={{color:C.cyan, fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:6}}>AI Executive Summary</div>
+          <div style={{fontSize:13, color:C.text, lineHeight:1.5}}>{aiText}</div>
+       </div>
+    </div>
+    <div style={{display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(200px, 1fr))", gap:14, marginBottom:24}}>
+      <div style={{...cs, position:"relative", overflow:"hidden"}}>
+         <div style={{display:"flex", justifyContext:"space-between", alignItems:"center"}}><div style={{fontSize:10, color:C.dim, fontWeight:700, textTransform:"uppercase"}}>Team Avg</div>{wow!=null&&<WoWBadge delta={wow}/>}</div>
+         <div style={{fontSize:32, fontWeight:800, color:"#fff", fontFamily:"'Geist Mono',monospace", marginTop:8}}>{avg}</div>
+         <div style={{width:"100%", background:C.bg, height:6, borderRadius:3, marginTop:12}}><div style={{width: Math.min(100, (avg/GOAL)*100)+"%", background:C.cyan, height:"100%", borderRadius:3}}></div></div>
+         <div style={{display:"flex", justifyContext:"space-between", fontSize:9, color:C.dim, marginTop:6, fontFamily:"monospace"}}><span>Current</span><span>Goal: {GOAL}</span></div>
+      </div>
+      <div style={{...cs, border:"1px solid "+C.red+"44", background:"#1a0f14"}}>
+        <div style={{fontSize:10, color:C.dim, fontWeight:700, textTransform:"uppercase", display:"flex", alignItems:"center", gap:6}}><span style={{color:C.red}}>●</span> Critical Risk</div>
+        <div style={{fontSize:32, fontWeight:800, color:C.red, fontFamily:"'Geist Mono',monospace", marginTop:8}}>{criticalAgents.length}<span style={{fontSize:14, color:C.red, opacity:0.5, fontFamily:"sans-serif", marginLeft:4}}>/ {scored.length}</span></div>
+        <div style={{fontSize:10, color:C.red, opacity:0.8, marginTop:8, lineHeight:1.3}}>Agents stagnated &gt;5pts below goal.</div>
+      </div>
+      <div style={{...cs, borderLeft:"3px solid "+C.cyan}}>
+         <div style={{fontSize:10, color:C.cyan, fontWeight:700, textTransform:"uppercase"}}>⇡ Fastest Path to {GOAL}</div>
+         {fastestPath ? (
+            <><div style={{fontSize:14, fontWeight:700, color:"#fff", marginTop:8, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{fastestPath.n}</div>
+              <div style={{display:"flex", alignItems:"center", gap:8, marginTop:6}}><span style={{fontSize:20, fontWeight:700, fontFamily:"'Geist Mono',monospace", color:C.text}}>{fastestPath.w[wIdx]}</span><span style={{fontSize:10, background:C.cyan+"1a", color:C.cyan, padding:"2px 6px", borderRadius:4, border:"1px solid "+C.cyan+"33"}}>- {(GOAL - fastestPath.w[wIdx]).toFixed(1)} pts</span></div></>
+         ) : <div style={{fontSize:11, color:C.dim, marginTop:8}}>No agents in convertible range</div>}
+      </div>
+      <div style={{...cs}}>
+         <div style={{fontSize:10, color:C.dim, fontWeight:700, textTransform:"uppercase", marginBottom:12}}>Top Bottlenecks</div>
+         {scAvgs.map((b,i) => (
+            <div key={b.code} style={{marginBottom: i===0?12:0}}>
+              <div style={{display:"flex", justifyContext:"space-between", fontSize:10, color:C.text, marginBottom:6}}><span style={{whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:120}}>{SC_FULL[b.code]}</span><span style={{fontFamily:"monospace", color: i===0?C.orange:C.amber, fontWeight:700}}>{b.val.toFixed(0)}%</span></div>
+              <div style={{width:"100%", background:C.bg, height:4, borderRadius:2}}><div style={{width: b.val+"%", background: i===0?C.orange:C.amber, height:"100%", borderRadius:2}}></div></div>
+            </div>
+         ))}
+      </div>
+    </div>
+    <div style={{...cs, padding:0, overflowX: "auto"}}>
+      <div style={{padding:"14px 20px", borderBottom:"1px solid "+C.border, display:"flex", justifyContext:"space-between", alignItems:"center", background:C.bg}}><span style={{fontSize:11, fontWeight:700, color:C.dim, textTransform:"uppercase", letterSpacing:1}}>Agent Rankings</span></div>
+      <table style={{width:"100%", borderCollapse:"collapse", fontSize:11, minWidth: "600px"}}>
+        <SortHeader columns={[["name","Agent"],["cat","Category"],["risk","Risk"],["score","Score ▼", 70],["gap","Gap to 72", 80], ["actions","", 80]]} sortKey={agSort.sk} sortDir={agSort.sd} onSort={agSort.toggle}/>
+        <tbody>{[...tl.agents].map(a=>{
+          const c=classify(a,wIdx); const gap = a.w[wIdx] != null ? +(GOAL - a.w[wIdx]).toFixed(1) : null;
+          return{a,name:a.n,score:a.w[wIdx]||0,cat:c.cat, gap: gap, risk:getRiskLevel(a,wIdx).level, color: c.color};}).sort((x,y)=>agSort.sortFn(x[agSort.sk],y[agSort.sk])).map(({a, name, score, cat, gap, risk, color},i)=>{
+          const isCritical = cat === "Critical" || cat === "Stagnant"; const isConvertible = cat === "Convertible"; const rowBg = isCritical ? C.red+"08" : isConvertible ? C.cyan+"08" : "transparent";
+          return <tr key={i} onClick={()=>onSelectAgent(a)} style={{cursor:"pointer", borderBottom:"1px solid "+C.border+"33", background: rowBg, transition:"all .15s"} onMouseEnter={e=>{e.currentTarget.style.background = isCritical ? C.red+"15" : isConvertible ? C.cyan+"15" : C.cyan+"08";}} onMouseLeave={e=>{e.currentTarget.style.background = rowBg;}}>
+            <td style={{padding:"12px 20px", fontWeight:600, display:"flex", alignItems:"center", gap:8}}>
+              {name} 
+              {isCritical ? <div style={{width:6, height:6, borderRadius:"50%", background:C.red, boxShadow:"0 0 4px "+C.red}}></div> : null} 
+              {(isConvertible && fastestPath && fastestPath.n === name) ? <div style={{width:6, height:6, borderRadius:"50%", background:C.cyan, boxShadow:"0 0 4px "+C.cyan}} title="Fastest Path"></div> : null}
+            </td>
+            <td style={{padding:"12px 20px"}}><span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background:color+"15", color:color, fontWeight:700, textTransform:"uppercase", border:"1px solid "+color+"33", letterSpacing:0.5}}>{cat}</span></td>
+            <td style={{padding:"12px 20px"}}><RiskBadge level={risk}/></td>
+            <td style={{padding:"12px 20px", fontWeight:800, fontFamily:"'Geist Mono',monospace", color:color, fontSize:13}}>{score||"--"}</td>
+            <td style={{padding:"12px 20px", fontFamily:"'Geist Mono',monospace", fontSize:11, color:C.dim}}>{gap !== null ? (gap > 0 ? <span style={{color:C.dim}}>-{gap} pts</span> : <span style={{color:C.green}}>--</span>) : "--"}</td>
+            <td style={{padding:"12px 20px", textAlign:"right"}}>
+              <button onClick={(e)=>{e.stopPropagation(); onSelectAgent(a);}} style={{fontSize:10, fontWeight:700, padding:"6px 14px", borderRadius:6, background:C.cyan+"10", color:C.cyan, border:"1px solid "+C.cyan+"33", cursor:"pointer", textTransform:"uppercase", transition:"all 0.2s"} onMouseEnter={e=>{e.currentTarget.style.background=C.cyan; e.currentTarget.style.color="#fff";}} onMouseLeave={e=>{e.currentTarget.style.background=C.cyan+"10"; e.currentTarget.style.color=C.cyan;}}>Coach</button>
+            </td>
+          </tr>;})}</tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function AgentView({agent,tl,wIdx}){
+  if(!agent)return null;
+  const v=agent.w[wIdx],cat=classify(agent,wIdx);
+  if(v==null)return <EmptyState message={"No evaluations for "+agent.n+" in week "+WEEKS[wIdx]}/>;
+  const tr=getAgentTrend(agent,wIdx);
+  const cards=genFocusCards("agent",agent,wIdx);
+  const trendData=agent.w.map((val,i)=>val!=null?{wk:WEEKS[i],score:val}:null).filter(Boolean);
+  const scData=SCS.map(c=>({name:SC_FULL[c],val:agent.sc[c]||0}));
+  return <div>
+    <HistoricalBanner wIdx={wIdx}/>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={v} label="Current Score" color={cat.color} delta={tr}/>
+      <KpiCard value={agent.pr+"%"} label="Procedures" color={agent.pr>=70?C.green:C.red}/>
+      <KpiCard value={agent.nt+"%"} label="Notes" color={agent.nt>=70?C.green:C.red}/>
+    </div>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>{cards.map((c,i)=><FocusCard key={i} card={c}/>)}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))",gap:12}}>
+      <div style={{...cs}}><div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Score Trend</div>
+        <ResponsiveContainer width="100%" height={180}>
+          <LineChart data={trendData}>
+            <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/><XAxis dataKey="wk" tick={{fontSize:9,fill:C.muted}} axisLine={false}/><YAxis domain={[0,100]} tick={{fontSize:9,fill:C.muted}} axisLine={false} width={28}/><Tooltip content={<Tp/>}/><ReferenceLine y={GOAL} stroke={C.green+"66"} strokeDasharray="4 4"/><Line type="monotone" dataKey="score" name="Score" stroke={C.cyan} strokeWidth={2} dot={{r:4,fill:C.cyan}}/>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div style={{...cs}}><div style={{fontSize:11,fontWeight:600,color:C.dim,marginBottom:8}}>Service Commitments</div>
+        {scData.map((d,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:6,marginTop:6}}><span style={{fontSize:9,color:C.dim,width:70,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.name}</span><div style={{flex:1,height:6,background:C.bg,borderRadius:3,overflow:"hidden"}}><div style={{width:d.val+"%",height:"100%",borderRadius:3,background:d.val>=70?C.green:d.val>=50?C.amber:C.red}}></div></div><span style={{fontSize:9,fontWeight:700,fontFamily:"monospace",width:28,textAlign:"right",color:d.val>=70?C.green:d.val>=50?C.amber:C.red}}>{d.val}%</span></div>)}
+      </div>
+    </div>
+  </div>;
+}
+
+function CoachingTab({alerts,wIdx,onSelectAgent,tls}){
+  const high=alerts.filter(a=>a.severity==="high"),med=alerts.filter(a=>a.severity==="medium");
+  return <div>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={alerts.length} label="Total Alerts" color={C.red} icon={"⚠"}/>
+      <KpiCard value={high.length} label="High Severity" color={C.red}/>
+      <KpiCard value={med.length} label="Medium" color={C.amber}/>
+    </div>
+    {high.length>0&&<div style={{...cs,marginBottom:12,borderLeft:"3px solid "+C.red}}><div style={{fontSize:11,fontWeight:600,color:C.red,marginBottom:8}}>{"⚠"} High Priority</div>{high.map((a,i)=><div key={i} style={{padding:"8px 0",borderBottom:i<high.length-1?"1px solid "+C.border+"22":undefined,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><span style={{fontSize:12,fontWeight:600,cursor:"pointer"} onClick={()=>{const t=tls.find(t=>t.name===a.tl);const ag=t?.agents.find(x=>x.n===a.agent);if(ag&&t)onSelectAgent(ag,t);}}>{a.agent}</span><span style={{fontSize:10,color:C.dim,marginLeft:8}}>{a.tl}</span></div><span style={{fontSize:10,color:C.red}}>{a.msg}</span></div>)}</div>}
+    {med.length>0&&<div style={{...cs,borderLeft:"3px solid "+C.amber}}><div style={{fontSize:11,fontWeight:600,color:C.amber,marginBottom:8}}>{"⚠"} Monitor</div>{med.map((a,i)=><div key={i} style={{padding:"6px 0",borderBottom:i<med.length-1?"1px solid "+C.border+"22":undefined,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div><span style={{fontSize:11,fontWeight:600,cursor:"pointer"} onClick={()=>{const t=tls.find(t=>t.name===a.tl);const ag=t?.agents.find(x=>x.n===a.agent);if(ag&&t)onSelectAgent(ag,t);}}>{a.agent}</span><span style={{fontSize:10,color:C.dim,marginLeft:8}}>{a.tl}</span></div><span style={{fontSize:10,color:C.amber}}>{a.msg}</span></div>)}</div>}
+    {!alerts.length&&<EmptyState message="No coaching alerts this week."/>}
+  </div>;
+}
+
+function QAAnalyticsTab({wIdx, onSelectQA}){
+  const qaSort = useSort("n");
+  const [view, setView] = useState("calibration"); 
+  
+  const targetWeek = D.weekISO[wIdx];
+  const weekInts = (D.rawInts || []).filter(int => getWeekStart(int.date) === targetWeek);
+
+  const qaMap = {};
+  let totalScore = 0;
+
+  weekInts.forEach(int => {
+    if(!qaMap[int.qa]) qaMap[int.qa] = { name: int.qa, scores: [], n: 0, chars: 0, commentsCount: 0, metTotal: 0, metWithNote: 0, criticalFails: 0, totalValidMins: 0, validEvalsCount: 0 };
+    const q = qaMap[int.qa];
+    q.scores.push(int.score); q.n++; totalScore += int.score;
+    if(int.score < 50) q.criticalFails++;
+    Object.values(int.comments || {}).forEach(c => { if (c.trim().length > 0) { q.chars += c.trim().length; q.commentsCount++; } });
+    Object.keys(int.comments || {}).forEach(qText => { const code = SC_MAP[qText]; if (code && (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed")) q.metWithNote++; });
+    SCS.forEach(code => { if (int.sc?.[code] === "Met" || int.sc?.[code] === "Exceed") q.metTotal++; });
+    if (int.duration >= 1 && int.duration <= 120) { q.totalValidMins += int.duration; q.validEvalsCount++; }
+  });
+
+  const teamAvg = weekInts.length ? +(totalScore / weekInts.length).toFixed(1) : 0;
+
+  const qaData = Object.values(qaMap).map(q => {
+    const avg = +(q.scores.reduce((s,v)=>s+v,0) / q.n).toFixed(1);
+    const sd = +Math.sqrt(q.scores.reduce((s,v)=>s+(v-avg)**2,0) / q.n).toFixed(1);
+    const deviation = +(avg - teamAvg).toFixed(1);
+    const avgChars = q.commentsCount > 0 ? Math.round(q.chars / q.commentsCount) : 0;
+    const metNotePct = q.metTotal > 0 ? Math.round((q.metWithNote / q.metTotal) * 100) : 0;
+    const failRate = q.n > 0 ? Math.round((q.criticalFails / q.n) * 100) : 0;
+    const avgAHT = q.validEvalsCount > 0 ? Math.round(q.totalValidMins / q.validEvalsCount) : 0;
+
+    let focusArea = "Calibrated"; let statusColor = C.green;
+    if (deviation < -5) { focusArea = "Too Severe"; statusColor = C.red; }
+    else if (deviation > 5) { focusArea = "Too Lenient"; statusColor = C.amber; }
+    else if (sd > 8) { focusArea = "Inconsistent Criteria"; statusColor = C.orange; }
+    else if (avgChars > 0 && avgChars < 30) { focusArea = "Poor Feedback"; statusColor = C.purple; }
+
+    return { ...q, avg, sd, deviation, focusArea, statusColor, avgChars, metNotePct, failRate, avgAHT };
+  }).filter(q => q.n > 0);
+
+  const alerts = [];
+  if (qaData.length > 0) {
+    const mostSevere = [...qaData].sort((a,b)=>a.deviation - b.deviation)[0];
+    if (mostSevere && mostSevere.deviation < -4) alerts.push({ qa: mostSevere.name, val: mostSevere.deviation, msg: `Scoring ${Math.abs(mostSevere.deviation)} pts below team average. Requires calibration.`, color: C.red, icon: "⛔", title: "Severity Alert" });
+    const mostVolatile = [...qaData].sort((a,b)=>b.sd - a.sd)[0];
+    if (mostVolatile && mostVolatile.sd > 7) alerts.push({ qa: mostVolatile.name, val: mostVolatile.sd, msg: `Highest standard deviation (${mostVolatile.sd}). Unstable scoring criteria.`, color: C.orange, icon: "⚠", title: "Volatility Alert" });
+  }
+
+  const ScatterTooltip = ({ active, payload }) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return <div style={{background:C.panel,border:"1px solid "+C.border,borderRadius:8,padding:"10px 14px",fontSize:11,boxShadow:"0 4px 12px rgba(0,0,0,0.5)"}}>
+        <div style={{color:C.text, fontWeight:800, marginBottom:6, fontSize:12}}>{data.name}</div>
+        <div style={{color:C.cyan, marginBottom:2}}>Avg Score: <b style={{fontFamily:"monospace",fontSize:12}}>{data.avg}</b></div>
+        <div style={{color:data.sd>7?C.red:C.amber}}>Volatility: <b style={{fontFamily:"monospace",fontSize:12}}>{data.sd}</b></div>
+        <div style={{color:C.purple, marginBottom:2}}>Avg Feedback: <b style={{fontFamily:"monospace",fontSize:12}}>{data.avgChars} chars</b></div>
+      </div>;
+    }
+    return null;
+  };
+
+  let tableColumns = [];
+  if (view === "calibration") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avg","Avg Score",80],["deviation","Dev. from Avg",100],["sd","Volatility (SD)",100],["focusArea","Focus Area"]];
+  else if (view === "feedback") tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgChars","Avg Comment Length",140],["metNotePct","Positive Reinforcement",150],["commentsCount","Total Notes",90],["focusArea","Focus Area"]];
+  else tableColumns = [["name","QA Analyst"],["n","Evals",60],["avgAHT","Avg Time (mins)",120],["failRate","Zero-Out Rate (<50)",140],["avg","Avg Score",80],["focusArea","Focus Area"]];
+
+  const btnStyle = (active) => ({fontSize:10, padding:"6px 14px", borderRadius:6, cursor:"pointer", fontWeight:600, border:"none", background: active ? C.cyan+"22" : "transparent", color: active ? C.cyan : C.dim, borderBottom: active ? "2px solid "+C.cyan : "2px solid transparent", transition: "all 0.2s"});
+
+  return <div>
+    <div style={{display:"flex",gap:12,marginBottom:16,flexWrap:"wrap"}}>
+      <KpiCard value={qaData.length} label={`Active Analysts (${WEEKS[wIdx]})`} color={C.purple} icon={"🕵️"}/>
+      <KpiCard value={weekInts.length} label="Total Evaluations" color={C.blue} icon={"📋"}/>
+      <KpiCard value={teamAvg||"--"} label="Weekly Team Average" color={C.cyan} icon={"⌀"}/>
+    </div>
+
+    {alerts.length > 0 && <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))",gap:12,marginBottom:16}}>
+      {alerts.map((al, i) => <div key={i} style={{...cs, borderLeft: "3px solid " + al.color, display: "flex", gap: 12, alignItems: "center"}}><div style={{fontSize: 24}}>{al.icon}</div><div><div style={{fontSize: 10, fontWeight: 700, color: al.color, textTransform: "uppercase", letterSpacing: 0.5}}>{al.title}</div><div style={{fontSize: 13, fontWeight: 700, color: C.text, marginTop: 2}}>{al.qa}</div><div style={{fontSize: 10, color: C.dim, marginTop: 2}}>{al.msg}</div></div></div>)}
+    </div>}
+
+    <div style={{...cs,marginBottom:16}}>
+      <div style={{display:"flex", justifyContext:"space-between", alignItems:"center", marginBottom:4}}><div style={{fontSize:12,fontWeight:700,color:C.text}}>Calibration Quadrant</div><div style={{fontSize:10, color:C.dim}}>X: Average Score | Y: Volatility (Std Dev)</div></div>
+      {qaData.length > 0 ? (
+        <ResponsiveContainer width="100%" height={260}>
+          <ScatterChart margin={{ top: 20, right: 30, bottom: 20, left: -20 }}>
+            <CartesianGrid stroke={C.border+"50"} strokeDasharray="3 3"/>
+            <XAxis type="number" dataKey="avg" name="Avg Score" domain={['dataMin - 2', 'dataMax + 2']} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} />
+            <YAxis type="number" dataKey="sd" name="Volatility" domain={[0, 'auto']} tick={{fontSize:10,fill:C.muted}} axisLine={false} tickLine={false} />
+            <ZAxis type="number" dataKey="n" range={[60, 400]} name="Evaluations" />
+            <Tooltip cursor={{strokeDasharray: '3 3'}} content={<ScatterTooltip/>} />
+            <ReferenceLine x={teamAvg} stroke={C.cyan+"66"} strokeDasharray="4 4" label={{value:`Team Avg (${teamAvg})`, position:"top", fill:C.cyan, fontSize:10}} />
+            <ReferenceLine y={5} stroke={C.amber+"66"} strokeDasharray="4 4" label={{value:"Volatility Threshold", position:"insideRight", fill:C.amber, fontSize:10}} />
+            <Scatter name="Analysts" data={qaData}>{qaData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.statusColor} opacity={0.8} />)}</Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
+      ) : <EmptyState message={`No QA evaluations found for ${WEEKS[wIdx]}.`} />}
+    </div>
+
+    <div style={{...cs, overflowX: "auto"}}>
+      <div style={{display:"flex", justifyContext:"space-between", alignItems:"center", marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:700,color:C.text}}>Analyst Performance Lenses <span style={{fontSize:10, fontWeight:400, color:C.dim}}>(Weekly: {WEEKS[wIdx]})</span></div>
+        <div style={{display:"flex", background:C.bg, borderRadius:8, padding:2, border:"1px solid "+C.border}}>
+          <button onClick={() => setView("calibration")} style={btnStyle(view === "calibration")}>🎯 Calibration</button>
+          <button onClick={() => setView("feedback")} style={btnStyle(view === "feedback")}>✍️ Coaching & Feedback</button>
+          <button onClick={() => setView("ops")} style={btnStyle(view === "ops")}>⏱️ Operations</button>
+        </div>
+      </div>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11, minWidth: "500px"}}>
+        <SortHeader columns={tableColumns} sortKey={qaSort.sk} sortDir={qaSort.sd} onSort={qaSort.toggle}/>
+        <tbody>{[...qaData].sort((a,b)=>qaSort.sortFn(a[qaSort.sk],b[qaSort.sk])).map((q,i)=>
+          <tr key={i} onClick={() => onSelectQA(q.name)} style={{borderBottom:"1px solid "+C.border+"22", transition:"background 0.15s", cursor:"pointer"} onMouseEnter={e=>e.currentTarget.style.background=C.cyan+"08"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+            <td style={{padding:"10px",fontWeight:600, color:C.text}}>{q.name}</td><td style={{padding:"10px",fontFamily:"monospace"}}>{q.n}</td>
+            {view === "calibration" && <>
+              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:q.avg>=GOAL?C.green:C.amber}}>{q.avg}</td>
+              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600}}><span style={{color: q.deviation > 0 ? C.cyan : q.deviation < 0 ? C.red : C.dim}}>{q.deviation > 0 ? "▲ +" : q.deviation < 0 ? "▼ " : ""}{q.deviation !== 0 ? q.deviation : "--"} pts</span></td>
+              <td style={{padding:"10px",fontFamily:"monospace",color:q.sd>7?C.orange:C.dim}}>{q.sd}</td>
+            </>}
+            {view === "feedback" && <>
+              <td style={{padding:"10px",fontFamily:"monospace",fontWeight:600, color: q.avgChars < 30 ? C.red : C.cyan}}>{q.avgChars} chars/eval</td>
+              <td style={{padding:"10px",fontFamily:"monospace"}}><div style={{display:"flex", alignItems:"center", gap:6}}><div style={{width:40, height:4, background:C.bg, borderRadius:2}}><div style={{width:q.metNotePct+"%", height:"100%", background:C.purple, borderRadius:2}}></div></div><span>{q.metNotePct}%</span></div></td>
+              <td style={{padding:"10px",fontFamily:"monospace", color:C.dim}}>{q.commentsCount} notes</td>
+            </>}
+            {view === "ops" && <>
+              <td style={{padding:"10px",fontFamily:"monospace", color:C.text}}>{q.avgAHT > 0 ? `${q.avgAHT} mins` : "--"}</td>
+              <td style={{padding:"10px",fontFamily:"monospace", color: q.failRate > 10 ? C.red : C.dim}}>{q.failRate}% fatals</td>
+              <td style={{padding:"10px",fontWeight:800,fontFamily:"monospace",color:C.cyan}}>{q.avg}</td>
+            </>}
+            <td style={{padding:"10px"}}><span style={{fontSize:9, padding:"4px 8px", borderRadius:4, background: q.statusColor+"15", color: q.statusColor, fontWeight:700, textTransform:"uppercase", letterSpacing:0.5, border:"1px solid "+q.statusColor+"33"}}>{q.focusArea}</span></td>
+          </tr>)}
+        </tbody>
+      </table>
+    </div>
+  </div>;
+}
+
+function LoadingScreen({error,onSetup}){
+  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif", display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
+    <div style={{textAlign:"center"}}>
+      <div style={{marginBottom:20}}><svg width="48" height="48" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg></div><div style={{fontSize:24,fontWeight:800,letterSpacing:"-0.5px",marginBottom:16}}>Next<span style={{color:"#06b6d4"}}>Skill</span></div>
+      {error?<><p style={{fontSize:12,color:C.red,margin:"0 0 16px",maxWidth:400}}>{error}</p><button onClick={onSetup} style={{padding:"8px 20px",borderRadius:6,border:"1px solid "+C.cyan,background:"transparent",color:C.cyan,fontSize:11,cursor:"pointer"}}>Configure</button></>:<div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}><div style={{width:6,height:6,borderRadius:"50%",background:C.cyan,animation:"pulse 1.5s infinite"}}></div><span style={{fontSize:11,color:C.dim,fontFamily:"monospace"}}>Initializing platform...</span></div>}
+    </div>
+    <style>{`@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}`}</style>
+  </div>;
+}
+
+function SetupScreen({onDataReady,savedConfig}){
+  const[qaId,setQaId]=useState(savedConfig?.qaId||""); const[rosterId,setRosterId]=useState(savedConfig?.rosterId||""); const[surveyId,setSurveyId]=useState(savedConfig?.surveyId||""); const[loading,setLoading]=useState(false); const[error,setError]=useState(null); const autoFetched=React.useRef(false);
+  React.useEffect(()=>{if(savedConfig?.qaId&&savedConfig?.rosterId&&!autoFetched.current){autoFetched.current=true;handleConnect(savedConfig.qaId,savedConfig.rosterId,savedConfig.surveyId);}},[]);
+  const extractId=(input)=>{if(!input)return"";const s=input.trim();const m=s.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);return m?m[1]:s;};
+  const handleConnect=async(qId,rId,sId)=>{
+    const q=extractId(qId||qaId),r=extractId(rId||rosterId),s=extractId(sId||surveyId);
+    if(!q||!r){setError("QA and Roster Sheet IDs required.");return;}
+    setLoading(true);setError(null);
+    try{const result=await fetchFromSheets(q,r,s); if(result.error){setError(result.error);setLoading(false);return;} window.location.hash="qa="+q+"&roster="+r+"&survey="+s; onDataReady(result,{qaId:q,rosterId:r,surveyId:s});}catch(err){setError(err.message);setLoading(false);}
+  };
+  const inp={width:"100%",padding:"10px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,color:C.text,fontSize:12,fontFamily:"monospace",outline:"none",boxSizing:"border-box"};
+  return <div style={{minHeight:"100vh",background:C.bg,color:C.text,fontFamily:"'Segoe UI',system-ui,sans-serif",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:40}}>
+    <div style={{maxWidth:500,width:"100%"}}>
+      <div style={{textAlign:"center",marginBottom:32}}>
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}><svg width="40" height="40" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg><span style={{fontSize:22,fontWeight:800,letterSpacing:"-0.5px"}}>Next<span style={{color:"#06b6d4"}}>Skill</span></span></div>
+        <p style={{fontSize:11,color:C.dim,margin:0}}>Configure your data sources</p>
+      </div>
+      <div style={{marginBottom:12}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>QA REVIEWS SHEET *</label><input value={qaId} onChange={e=>setQaId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
+      <div style={{marginBottom:12}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>ROSTER SHEET *</label><input value={rosterId} onChange={e=>setRosterId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
+      <div style={{marginBottom:20}}><label style={{fontSize:10,fontWeight:600,color:C.dim,display:"block",marginBottom:4}}>SURVEY SHEET (optional)</label><input value={surveyId} onChange={e=>setSurveyId(e.target.value)} placeholder="Paste URL or Sheet ID" style={inp}/></div>
+      {error&&<div style={{background:C.red+"12",border:"1px solid "+C.red+"30",borderRadius:8,padding:"10px 14px",marginBottom:16}}><span style={{fontSize:11,color:C.red}}>{error}</span></div>}
+      <button onClick={()=>handleConnect()} disabled={!qaId||!rosterId||loading} style={{width:"100%",padding:"14px 0",borderRadius:8,border:"none", background:qaId&&rosterId&&!loading?"linear-gradient(135deg,"+C.cyan+","+C.blue+")":C.muted, color:qaId&&rosterId?C.text:C.text+"66",fontSize:13,fontWeight:700,cursor:qaId&&rosterId&&!loading?"pointer":"not-allowed", letterSpacing:"1px",textTransform:"uppercase"}}>{loading?"Connecting...":"Connect & Launch"}</button>
+    </div>
+  </div>;
+}
+
 export default function NextSkill(){
   const[data,setData]=useState(null);
   const[config,setConfig]=useState(()=>{
@@ -2201,7 +1221,7 @@ export default function NextSkill(){
     <div style={{background:C.panel,borderBottom:"1px solid "+C.border,padding:"12px 28px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
         <div style={{display:"flex",alignItems:"center",gap:16}}>
-          <div style={{display:"flex",alignItems:"center",gap:8, cursor:"pointer"}} onClick={()=>{setSelTL(null);setSelAgent(null);setShowProfile(false);setTab("dashboard");navPush({tab:"dashboard"});}}>
+          <div style={{display:"flex",alignItems:"center",gap:8, cursor:"pointer"} onClick={()=>{setSelTL(null);setSelAgent(null);setShowProfile(false);setTab("dashboard");navPush({tab:"dashboard"});}}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="4" r="2.5" fill="#06b6d4"/><circle cx="4" cy="18" r="2.5" fill="#06b6d4"/><circle cx="20" cy="18" r="2.5" fill="#06b6d4"/><circle cx="18" cy="10" r="2" fill="#06b6d4"/><line x1="12" y1="4" x2="4" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="20" y2="18" stroke="#06b6d4" strokeWidth="1.5"/><line x1="12" y1="4" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/><line x1="4" y1="18" x2="18" y2="10" stroke="#06b6d4" strokeWidth="1.5"/></svg>
             <span style={{fontSize:16,fontWeight:800,letterSpacing:"-0.5px",color:C.text}}>Next<span style={{color:C.cyan}}>Skill</span></span>
           </div>
@@ -2234,6 +1254,7 @@ export default function NextSkill(){
         <TabButton label="Dashboard" active={tab==="dashboard"} onClick={()=>changeTab("dashboard")}/>
         <TabButton label="Leadership" active={tab==="leadership"} onClick={()=>changeTab("leadership")}/>
         <TabButton label="Coaching" active={tab==="coaching"} onClick={()=>changeTab("coaching")} badge={alerts.filter(a=>a.severity==="high").length}/>
+        <TabButton label="Trend Analysis" active={tab==="trends"} onClick={()=>changeTab("trends")}/>
         {isGodMode && <TabButton label="QA Analytics" active={tab==="qa"} onClick={()=>changeTab("qa")}/>}
         <TabButton label="Intelligence" active={tab==="intel"} onClick={()=>changeTab("intel")}/>
       </div>
@@ -2252,7 +1273,7 @@ export default function NextSkill(){
         <select value={selTL?filteredTLs.indexOf(selTL):""} onChange={e=>{const v=e.target.value;if(v===""){setSelTL(null);setSelAgent(null);}else{const tl=filteredTLs[+v];if(tl)onSelectTL(tl);}}} style={sel}>
           <option value="">All Team Leads</option>
           {filteredTLs.map((t,i)=><option key={i} value={i}>{t.name}</option>)}</select>
-        <button onClick={()=>exportCoachingCSV(D.tls,wIdx,D.surveyData)} style={{...sel,color:C.teal,borderColor:C.teal+"44"}} title="Export Coaching Report">{"📥"} Export</button>
+        <button onClick={()=>exportCoachingCSV(D.tls,wIdx,D.surveyData)} style={{...sel,color:C.teal,borderColor:C.teal+"44"}..} title="Export Coaching Report">{"📥"} Export</button>
       </div>
     </div>}
 
@@ -2265,6 +1286,7 @@ export default function NextSkill(){
         {tab==="leadership"&&<LeadershipTab tls={filteredTLs} wIdx={wIdx} onSelectLeader={setSelLeaderDetail}/>}
         
         {tab==="coaching"&&<CoachingTab alerts={alerts} wIdx={wIdx} onSelectAgent={onSelectAgent} tls={D.tls}/>}
+        {tab==="trends"&&<TrendsTab wIdx={wIdx} rawInts={D.rawInts} site={site} tls={D.tls} />}
         {tab==="qa"&&<QAAnalyticsTab wIdx={wIdx} onSelectQA={setSelQA}/>}
         {tab==="intel"&&<IntelligenceTab csatData={csatData} surveyData={D.surveyData} onSelectAgent={onSelectAgent} tls={D.tls}/>}
       </div>
