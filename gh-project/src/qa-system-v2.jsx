@@ -714,7 +714,7 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
           <div style={{background:"#0c2d1e",borderRadius:12,border:"1px solid #1a4a32",padding:16}}>
             <div style={{fontSize:10,color:"#6ee7b7",fontWeight:700,marginBottom:8,textTransform:"uppercase"}}>🔥 Most Improved Agents</div>
             {mostImproved.map((mi, i) => (
-               <div key={i} onClick={() => { const t = filteredTLs.find(tl => tl.agents.some(x => x.n === mi.n)); if(t) onSelectAgent(mi.a, t); }} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",cursor:"pointer",borderBottom:i<mostImproved.length-1?"1px solid #1a4a32":"none"} onMouseEnter={e=>e.currentTarget.style.opacity=0.8} onMouseLeave={e=>e.currentTarget.style.opacity=1}}>
+               <div key={i} onClick={() => { const t = filteredTLs.find(tl => tl.agents.some(x => x.n === mi.n)); if(t) onSelectAgent(mi.a, t); }} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",cursor:"pointer",borderBottom:i<mostImproved.length-1?"1px solid #1a4a32":"none"}} onMouseEnter={e=>e.currentTarget.style.opacity=0.8} onMouseLeave={e=>e.currentTarget.style.opacity=1}>
                  <span style={{fontSize:11,color:C.text,fontWeight:600}}>{mi.n}</span>
                  <span style={{fontSize:10,color:C.green,fontWeight:700}}>+{mi.imp} <span style={{color:C.green,opacity:0.6}}>({mi.cur})</span></span>
                </div>
