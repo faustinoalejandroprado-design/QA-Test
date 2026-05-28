@@ -1978,6 +1978,35 @@ function SetupScreen({onDataReady,savedConfig}){
 }
 
 export default function NextSkill(){
+  if (data && data !== D) {
+    D = data;
+    WEEKS = D.weeks;
+    LATEST_WIDX = WEEKS.length - 1;
+  }
+  if (!D) {
+    return <LoadingScreen error={loadError} onSetup={()=>setShowSetup(true)}/>;
+  }
+  eturn (
+    <div style={{...}}>
+      {/* Tu navegación ahora es segura porque D ya existe */}
+      <div style={{display:"flex",gap:4,marginTop:12, overflowX:"auto"}}>
+        <TabButton label="Dashboard" active={tab==="dashboard"} onClick={()=>changeTab("dashboard")}/>
+        <TabButton label="Leadership" active={tab==="leadership"} onClick={()=>changeTab("leadership")}/>
+        <TabButton label="Coaching" active={tab==="coaching"} onClick={()=>changeTab("coaching")} badge={alerts.filter(a=>a.severity==="high").length}/>
+        <TabButton label="Trend Analysis" active={tab==="trends"} onClick={()=>changeTab("trends")}/>
+        <TabButton label="Intelligence" active={tab==="intel"} onClick={()=>changeTab("intel")}/>
+      </div>
+
+      <div style={{flex:1}}>
+        {tab==="dashboard" && ...}
+        {tab==="trends" && <TrendsTab wIdx={wIdx} rawInts={D.rawInts} site={site} tls={D.tls} />}
+        {tab==="leadership" && ...}
+        {tab==="coaching" && ...}
+        {tab==="intel" && <IntelligenceTab csatData={csatData} surveyData={D.surveyData} onSelectAgent={onSelectAgent} tls={D.tls} />}
+      </div>
+    </div>
+  );
+}
   const[data,setData]=useState(null);
   const[config,setConfig]=useState(()=>{
     const h=window.location.hash.substring(1);const params=new URLSearchParams(h);
