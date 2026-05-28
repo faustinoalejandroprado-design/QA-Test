@@ -1587,11 +1587,11 @@ function CampaignView({wIdx,onSelectTL,onSelectAgent,catFilter,setCatFilter,csat
           </ResponsiveContainer>
         </div>
         <div style={{display:"grid",gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",gap:12}}>
-          <div style={{...cs}}>
+    <div style={{...cs}}>
             <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:12}}>Agent Categories</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
               {catData.sort((a,b)=>b.count-a.count).slice(0,6).map(d=><div key={d.cat} onClick={()=>setCatFilter(catFilter===d.cat?null:d.cat)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6,padding:"10px 4px",borderRadius:8,cursor:"pointer", background:catFilter===d.cat?d.color+"12":"transparent",border:catFilter===d.cat?"1px solid "+d.color+"33":"1px solid transparent",transition:"all .15s"}} onMouseEnter={e=>{if(catFilter!==d.cat)e.currentTarget.style.background=d.color+"08";}} onMouseLeave={e=>{if(catFilter!==d.cat)e.currentTarget.style.background="transparent";}}>
-                <div style={{position:"relative"}}><DonutChart value={d.count} total={scored.length} color={d.color} size={56}/><div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}..}><span style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:d.color}}>{d.count}</span></div></div>
+                <div style={{position:"relative"}}><DonutChart value={d.count} total={scored.length} color={d.color} size={56}/><div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:14,fontWeight:800,fontFamily:"monospace",color:d.color}}>{d.count}</span></div></div>
                 <span style={{fontSize:9,color:catFilter===d.cat?d.color:C.dim,fontWeight:500,textAlign:"center"}}>{d.cat}</span>
               </div>)}
             </div>
