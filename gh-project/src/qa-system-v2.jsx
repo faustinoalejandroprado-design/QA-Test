@@ -2175,21 +2175,24 @@ export default function NextSkill(){
 
   React.useEffect(() => { if(!config || !initialLoad.current) return; handleRefresh(); }, [weekMode, handleRefresh, config]);
 
+  // 1. LOS HOOKS VAN PRIMERO (Solución al pantallazo azul)
+  const filteredTLs=useMemo(()=>!data?[]:site==="all"?data.tls:data.tls.filter(t=>t.site===site),[site,data]);
+  const alerts=useMemo(()=>!data?[]:generateAlerts(data.tls,wIdx),[data,wIdx]);
+  const csatData=useMemo(()=>!data?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(data.tls,data.surveyData,data.rawInts),[data]);
+
+  const onSelectTL=(tl)=>{setSelTL(tl);setSelAgent(null);setShowProfile(false);setTab("dashboard");setCatFilter(null);navPush({tab:"dashboard",tl});};
+  const onSelectAgent=(a,tl)=>{setSelAgent(a);setSelAgentTL(tl||selTL);setShowProfile(true);setTab("dashboard");navPush({tab:"dashboard",tl:tl||selTL,agent:a,agentTL:tl||selTL});};
+
+  // 2. ACTUALIZACIÓN DE VARIABLES GLOBALES
   if (data && data !== D) {
     D = data;
     WEEKS = D.weeks;
     LATEST_WIDX = WEEKS.length - 1;
   }
   
+  // 3. LOS EARLY RETURNS VAN AL FINAL DE LA LÓGICA
   if(showSetup) return <SetupScreen savedConfig={config} onDataReady={(d,cfg)=>{setData(d);setConfig(cfg);setWIdx(d.weeks.length-1);setLastUpdated(new Date());setShowSetup(false);}}/>;
   if(!D) return <LoadingScreen error={loadError} onSetup={()=>setShowSetup(true)}/>;
-
-  const filteredTLs=useMemo(()=>!D?[]:site==="all"?D.tls:D.tls.filter(t=>t.site===site),[site,data]);
-  const alerts=useMemo(()=>!D?[]:generateAlerts(D.tls,wIdx),[data,wIdx]);
-  const csatData=useMemo(()=>!D?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(D.tls,D.surveyData,D.rawInts),[data]);
-
-  const onSelectTL=(tl)=>{setSelTL(tl);setSelAgent(null);setShowProfile(false);setTab("dashboard");setCatFilter(null);navPush({tab:"dashboard",tl});};
-  const onSelectAgent=(a,tl)=>{setSelAgent(a);setSelAgentTL(tl||selTL);setShowProfile(true);setTab("dashboard");navPush({tab:"dashboard",tl:tl||selTL,agent:a,agentTL:tl||selTL});};
 
   const sel={fontSize:11,background:C.bg,border:"1px solid "+C.border,borderRadius:20,color:C.text,padding:"7px 14px",fontFamily:"inherit",cursor:"pointer",outline:"none"};
 
