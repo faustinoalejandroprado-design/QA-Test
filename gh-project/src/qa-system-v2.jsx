@@ -20,9 +20,6 @@ const SC_MAP={"Warm Welcome & Respect":"WW","Thoughtful Listening":"TL","Underst
   "Ownership & Follow-Through":"OW","Sales as Service":"SS","Apologies & Gratitude":"AP",
   "Professionalism & Positive Intent":"PR","Living Our Values":"LV"};
 
-// ─────────────────────────────────────────────
-// C&B WRITING GUIDE - ANALYZER CONSTANTS
-// ─────────────────────────────────────────────
 const AVOID_PATTERNS = {
   "always / never (criticism)": /\b(always|never)\b/i,
   "must / you must (command)": /\b(we must|you must|must not)\b/i,
@@ -103,25 +100,6 @@ function getWeekStart(dateStr){
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff)).toISOString().substring(0,10);
 }
 
-function getCampaignSCStats(rawInts, siteFilter, targetWeek, tls) {
-  const stats = {};
-  SCS.forEach(code => stats[code] = { pos: 0, total: 0 });
-  const filteredInts = rawInts.filter(int => {
-    const matchesWeek = getWeekStart(int.date) === targetWeek;
-    const matchesSite = siteFilter === "all" || (tls.find(tl => tl.agents.some(a => a.n === int.agent))?.site === siteFilter);
-    return matchesWeek && matchesSite;
-  });
-  filteredInts.forEach(int => {
-    Object.entries(int.sc).forEach(([code, answer]) => {
-      if (stats[code]) {
-        stats[code].total += 1;
-        if (answer === "Met" || answer === "Exceed") stats[code].pos += 1;
-      }
-    });
-  });
-  return SCS.map(code => ({ code, name: SC_FULL[code], pct: stats[code].total > 0 ? Math.round((stats[code].pos / stats[code].total) * 100) : 0 }));
-}
-
 function processFiles(csvText,rosterTabs){
   const csv=Papa.parse(csvText,{header:true,skipEmptyLines:true});
 
@@ -158,7 +136,7 @@ function processFiles(csvText,rosterTabs){
 
   const interactions={};
   cfs.forEach(r=>{
-    const iid=r["Interaction ID"];
+    const iid = r["Interaction ID"] || r["id_interaccion"];
     if(!interactions[iid]){
       const sDate = safeDate(r["Time Started"]);
       const cDate = safeDate(r["Time Completed"]);
@@ -168,6 +146,8 @@ function processFiles(csvText,rosterTabs){
       }
 
       interactions[iid]={
+        account: r["Account Name"] || "General",
+        region: (r["Region"] || "").toUpperCase().includes("PH") ? "PH" : "MX",
         agent:r["Name"],email:r["Email"].trim().toLowerCase(),
         qa:r["Taker Name"],score:parseFloat(r["Overall Review Score"])||0,
         channel:(r["Channel"]||"").substring(0,3)||"???",
@@ -266,7 +246,7 @@ function processFiles(csvText,rosterTabs){
     score:int.score,channel:int.channel,date:int.date,sc:int.sc,
     proc:int.proc,notes:int.notes,comments:int.comments||{},
     assignmentId:int.assignmentId,interactionId:int.interactionId,url:int.url,
-    duration:int.duration
+    duration:int.duration, account:int.account, region:int.region
   }));
   return{weeks:weekLabels,weekISO:weeks,tls,qas,rawInts,
     stats:{interactions:Object.keys(interactions).length,agents:totalAgents,tlCount:tls.filter(t=>t.name!=="Unassigned").length,weekCount:weeks.length}};
@@ -397,7 +377,6 @@ function getOpportunities(agent,n=3){
   return SCS.map(c=>({code:c,name:SC_FULL[c],pct:agent.sc[c]||0}))
     .sort((a,b)=>a.pct-b.pct).slice(0,n);
 }
-// Ajustes generales de comportamiento de analíticas
 function getRiskLevel(agent,wIdx){
   const scores=agent.w.filter(v=>v!=null);
   if(scores.length<2)return{level:"LOW",reasons:[]};
@@ -1977,36 +1956,123 @@ function SetupScreen({onDataReady,savedConfig}){
   </div>;
 }
 
-export default function NextSkill(){
-  if (data && data !== D) {
-    D = data;
-    WEEKS = D.weeks;
-    LATEST_WIDX = WEEKS.length - 1;
-  }
-  if (!D) {
-    return <LoadingScreen error={loadError} onSetup={()=>setShowSetup(true)}/>;
-  }
-  eturn (
-    <div style={{...}}>
-      {/* Tu navegación ahora es segura porque D ya existe */}
-      <div style={{display:"flex",gap:4,marginTop:12, overflowX:"auto"}}>
-        <TabButton label="Dashboard" active={tab==="dashboard"} onClick={()=>changeTab("dashboard")}/>
-        <TabButton label="Leadership" active={tab==="leadership"} onClick={()=>changeTab("leadership")}/>
-        <TabButton label="Coaching" active={tab==="coaching"} onClick={()=>changeTab("coaching")} badge={alerts.filter(a=>a.severity==="high").length}/>
-        <TabButton label="Trend Analysis" active={tab==="trends"} onClick={()=>changeTab("trends")}/>
-        <TabButton label="Intelligence" active={tab==="intel"} onClick={()=>changeTab("intel")}/>
+function SeniorOverviewTab({ wIdx, rawInts, tls, weeks }) {
+  const targetWeek = weeks[wIdx];
+  const weekInts = (rawInts || []).filter(int => getWeekStart(int.date) === targetWeek);
+
+  const regionStats = {
+    MX: { scoreSum: 0, evals: 0, tls: [], criticals: 0 },
+    PH: { scoreSum: 0, evals: 0, tls: [], criticals: 0 }
+  };
+
+  let globalScoreSum = 0;
+  let globalEvals = 0;
+
+  tls.forEach(tl => {
+    const region = tl.site === "HMO" ? "MX" : "PH"; 
+    regionStats[region].tls.push(tl);
+
+    tl.agents.forEach(a => {
+      const score = a.w[wIdx];
+      if (score != null) {
+        regionStats[region].scoreSum += score;
+        regionStats[region].evals += 1;
+        globalScoreSum += score;
+        globalEvals += 1;
+        
+        if (score < 60) regionStats[region].criticals += 1;
+      }
+    });
+  });
+
+  const globalAvg = globalEvals ? +(globalScoreSum / globalEvals).toFixed(1) : 0;
+  const mxAvg = regionStats.MX.evals ? +(regionStats.MX.scoreSum / regionStats.MX.evals).toFixed(1) : 0;
+  const phAvg = regionStats.PH.evals ? +(regionStats.PH.scoreSum / regionStats.PH.evals).toFixed(1) : 0;
+
+  const chartData = [
+    { name: "Global", Promedio: globalAvg, fill: C.cyan },
+    { name: "México (MX)", Promedio: mxAvg, fill: C.green },
+    { name: "Filipinas (PH)", Promedio: phAvg, fill: C.purple }
+  ];
+
+  const scOpps = SCS.map(c => {
+    let total = 0;
+    let deducts = 0;
+    weekInts.forEach(int => {
+      const val = int.sc?.[c];
+      if (val) {
+        total++;
+        if (val !== "Met" && val !== "Exceed") deducts++;
+      }
+    });
+    return { code: c, name: SC_FULL[c], failRate: total > 0 ? Math.round((deducts/total)*100) : 0 };
+  }).sort((a,b) => b.failRate - a.failRate).slice(0, 3);
+
+  return (
+    <div>
+      <div style={{display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom: 20}}>
+        <div>
+          <h2 style={{fontSize: 22, fontWeight: 800, margin: 0, color: C.text}}>Global CX Health Overview</h2>
+          <div style={{fontSize: 12, color: C.dim, marginTop: 4}}>Visión ejecutiva de operaciones retail — Semana: {targetWeek}</div>
+        </div>
       </div>
 
-      <div style={{flex:1}}>
-        {tab==="dashboard" && ...}
-        {tab==="trends" && <TrendsTab wIdx={wIdx} rawInts={D.rawInts} site={site} tls={D.tls} />}
-        {tab==="leadership" && ...}
-        {tab==="coaching" && ...}
-        {tab==="intel" && <IntelligenceTab csatData={csatData} surveyData={D.surveyData} onSelectAgent={onSelectAgent} tls={D.tls} />}
+      <div style={{display:"flex", gap:16, marginBottom:24, flexWrap:"wrap"}}>
+        <KpiCard value={globalAvg} label="Global QA Score" color={globalAvg >= GOAL ? C.green : C.amber} icon="🌍" />
+        <KpiCard value={globalEvals} label="Total Evaluaciones" color={C.blue} icon="📊" />
+        <KpiCard value={regionStats.MX.criticals + regionStats.PH.criticals} label="Agentes en Riesgo (Global)" color={C.red} icon="⚠" />
+      </div>
+
+      <div style={{display:"grid", gridTemplateColumns:"2fr 1fr", gap:16, marginBottom: 24}}>
+        
+        <div style={{...cs, padding: 20}}>
+          <div style={{fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 16}}>Desempeño Regional (MX vs PH)</div>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart data={chartData} margin={{ top: 20, right: 30, left: -20, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+              <XAxis dataKey="name" tick={{fill: C.dim, fontSize: 12}} axisLine={false} tickLine={false} />
+              <YAxis domain={[0, 100]} tick={{fill: C.dim, fontSize: 12}} axisLine={false} tickLine={false} />
+              <Tooltip cursor={{fill: C.bg}} contentStyle={{backgroundColor: C.panel, borderColor: C.border, borderRadius: 8}} />
+              <ReferenceLine y={GOAL} stroke={C.green} strokeDasharray="4 4" label={{ position: 'top', value: 'Meta (72)', fill: C.green, fontSize: 10 }}/>
+              <Bar dataKey="Promedio" radius={[6, 6, 0, 0]}>
+                {chartData.map((entry, index) => (
+                  <Cell key={`cell-${index}`} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <div style={{display: "flex", flexDirection: "column", gap: 16}}>
+          {['MX', 'PH'].map(region => (
+            <div key={region} style={{...cs, flex: 1, borderLeft: `4px solid ${region === 'MX' ? C.green : C.purple}`}}>
+              <div style={{fontSize: 12, fontWeight: 700, color: C.dim, textTransform: "uppercase"}}>Operación {region}</div>
+              <div style={{fontSize: 28, fontWeight: 800, color: C.text, fontFamily: "monospace", marginTop: 8}}>
+                {region === 'MX' ? mxAvg : phAvg}
+              </div>
+              <div style={{display:"flex", justifyContent: "space-between", marginTop: 12, fontSize: 11, color: C.dim}}>
+                <span>Líderes: <b style={{color: C.text}}>{regionStats[region].tls.length}</b></span>
+                <span>Evals: <b style={{color: C.text}}>{regionStats[region].evals}</b></span>
+              </div>
+            </div>
+          ))}
+          
+          <div style={{...cs, flex: 1, borderLeft: `4px solid ${C.red}`}}>
+            <div style={{fontSize: 12, fontWeight: 700, color: C.dim, textTransform: "uppercase", marginBottom: 8}}>🔥 Top 3 Oportunidades (Global)</div>
+            {scOpps.map((opp, i) => (
+              <div key={i} style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: 6}}>
+                <span style={{fontSize: 10, color: C.text, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", maxWidth:140}}>{opp.name}</span>
+                <span style={{fontSize: 10, fontWeight: 700, color: C.red, fontFamily:"monospace"}}>{opp.failRate}% Fallo</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+export default function NextSkill(){
   const[data,setData]=useState(null);
   const[config,setConfig]=useState(()=>{
     const h=window.location.hash.substring(1);const params=new URLSearchParams(h);
@@ -2077,12 +2143,6 @@ export default function NextSkill(){
     if (newTab !== "leadership") setSelLeaderDetail(null);
   };
 
-  if(data&&data!==D){D=data;WEEKS=D.weeks;LATEST_WIDX=WEEKS.length-1;}
-
-  const filteredTLs=useMemo(()=>!D?[]:site==="all"?D.tls:D.tls.filter(t=>t.site===site),[site,data]);
-  const alerts=useMemo(()=>!D?[]:generateAlerts(D.tls,wIdx),[data,wIdx]);
-  const csatData=useMemo(()=>!D?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(D.tls,D.surveyData,D.rawInts),[data]);
-  
   const handleRefresh=useCallback(async()=>{
     if(!config||refreshing)return;setRefreshing(true);
     try{const result=await fetchFromSheets(config.qaId,config.rosterId,config.surveyId);
@@ -2115,8 +2175,18 @@ export default function NextSkill(){
 
   React.useEffect(() => { if(!config || !initialLoad.current) return; handleRefresh(); }, [weekMode, handleRefresh, config]);
 
+  if (data && data !== D) {
+    D = data;
+    WEEKS = D.weeks;
+    LATEST_WIDX = WEEKS.length - 1;
+  }
+  
   if(showSetup) return <SetupScreen savedConfig={config} onDataReady={(d,cfg)=>{setData(d);setConfig(cfg);setWIdx(d.weeks.length-1);setLastUpdated(new Date());setShowSetup(false);}}/>;
   if(!D) return <LoadingScreen error={loadError} onSetup={()=>setShowSetup(true)}/>;
+
+  const filteredTLs=useMemo(()=>!D?[]:site==="all"?D.tls:D.tls.filter(t=>t.site===site),[site,data]);
+  const alerts=useMemo(()=>!D?[]:generateAlerts(D.tls,wIdx),[data,wIdx]);
+  const csatData=useMemo(()=>!D?{findings:[],agentMap:{},pairs:[],pearson:null,categoryImpact:[],matched:0}:csatQaCorrelation(D.tls,D.surveyData,D.rawInts),[data]);
 
   const onSelectTL=(tl)=>{setSelTL(tl);setSelAgent(null);setShowProfile(false);setTab("dashboard");setCatFilter(null);navPush({tab:"dashboard",tl});};
   const onSelectAgent=(a,tl)=>{setSelAgent(a);setSelAgentTL(tl||selTL);setShowProfile(true);setTab("dashboard");navPush({tab:"dashboard",tl:tl||selTL,agent:a,agentTL:tl||selTL});};
@@ -2157,6 +2227,7 @@ export default function NextSkill(){
         </div>
       </div>
       <div style={{display:"flex",gap:4,marginTop:12, overflowX:"auto"}}>
+        <TabButton label="Global Overview" active={tab==="senior"} onClick={()=>changeTab("senior")}/>
         <TabButton label="Dashboard" active={tab==="dashboard"} onClick={()=>changeTab("dashboard")}/>
         <TabButton label="Leadership" active={tab==="leadership"} onClick={()=>changeTab("leadership")}/>
         <TabButton label="Coaching" active={tab==="coaching"} onClick={()=>changeTab("coaching")} badge={alerts.filter(a=>a.severity==="high").length}/>
@@ -2185,15 +2256,21 @@ export default function NextSkill(){
 
     <div style={{display:"flex",gap:0}}>
       <div style={{flex:1,padding: isMobile ? "16px 12px 40px" : "16px 28px 40px",minWidth:0}}>
+        
+        {tab==="senior" && <SeniorOverviewTab wIdx={wIdx} rawInts={D.rawInts} tls={D.tls} weeks={WEEKS} />}
+        
         {tab==="dashboard"&&(selAgent?<AgentView agent={selAgent} tl={selAgentTL||selTL} wIdx={wIdx}/>:
           selTL?<TLView tl={selTL} wIdx={wIdx} onSelectAgent={a=>onSelectAgent(a,selTL)} isMobile={isMobile}/>:
           <CampaignView wIdx={wIdx} onSelectTL={onSelectTL} onSelectAgent={onSelectAgent} catFilter={catFilter} setCatFilter={setCatFilter} csatFindings={csatData.findings} site={site} filteredTLs={filteredTLs} isMobile={isMobile}/>)}
         
-        {tab==="leadership"&&<LeadershipTab tls={filteredTLs} wIdx={wIdx} onSelectLeader={setSelLeaderDetail}/>}
+        {tab==="leadership" && (typeof LeadershipTab !== 'undefined' ? <LeadershipTab tls={filteredTLs} wIdx={wIdx} onSelectLeader={setSelLeaderDetail}/> : <EmptyState message="Componente de Leadership en desarrollo."/>)}
         
         {tab==="coaching"&&<CoachingTab alerts={alerts} wIdx={wIdx} onSelectAgent={onSelectAgent} tls={D.tls}/>}
-        {tab==="trends"&&<TrendsTab wIdx={wIdx} rawInts={D.rawInts} site={site} tls={D.tls} />}
+        
+        {tab==="trends" && (typeof TrendsTab !== 'undefined' ? <TrendsTab wIdx={wIdx} rawInts={D.rawInts} site={site} tls={D.tls} /> : <EmptyState message="Componente de Trends en desarrollo."/>)}
+        
         {tab==="qa"&&<QAAnalyticsTab wIdx={wIdx} onSelectQA={setSelQA}/>}
+        
         {tab==="intel"&&<IntelligenceTab csatData={csatData} surveyData={D.surveyData} onSelectAgent={onSelectAgent} tls={D.tls}/>}
       </div>
 
